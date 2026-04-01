@@ -64,8 +64,11 @@ class Job:
 app = Flask(__name__)
 
 jobs: dict[str, Job] = {}
+queued_job_ids: list[str] = []
 active_job_id: Optional[str] = None
 jobs_lock = threading.Lock()
+jobs_cv = threading.Condition(jobs_lock)
+scheduler_thread: Optional[threading.Thread] = None
 
 
 def strip_ansi(text: str) -> str:
@@ -104,7 +107,7 @@ def resolve_target_path(subdir: str, identifier: str) -> tuple[str, Path]:
     return normalized, target
 
 
-def serialize_job(job: Job) -> dict[str, object]:
+def serialize_job(job: Job, queue_position: Optional[int] = None) -> dict[str, object]:
     if job.total_files > 0:
         percent = round((job.completed_files / job.total_files) * 100, 1)
     elif job.status == "completed":
@@ -126,6 +129,7 @@ def serialize_job(job: Job) -> dict[str, object]:
         "total_files": job.total_files,
         "current_file": job.current_file,
         "completed_files": job.completed_files,
+        "queue_position": queue_position,
         "auth_enabled": bool(job.auth_username),
         "auth_username": job.auth_username,
         "cancel_requested": job.cancel_requested,
@@ -174,6 +178,86 @@ def prune_history_locked() -> None:
         jobs.pop(stale.id, None)
 
 
+def build_queue_positions_locked() -> dict[str, int]:
+    return {job_id: index + 1 for index, job_id in enumerate(queued_job_ids)}
+
+
+def build_queue_stats_locked() -> dict[str, object]:
+    total = len(jobs)
+    queued = 0
+    running = 0
+    completed = 0
+    failed = 0
+    cancelled = 0
+
+    for job in jobs.values():
+        if job.status == "queued":
+            queued += 1
+        elif job.status == "running":
+            running += 1
+        elif job.status == "completed":
+            completed += 1
+        elif job.status == "failed":
+            failed += 1
+        elif job.status == "cancelled":
+            cancelled += 1
+
+    terminal = completed + failed + cancelled
+    if total > 0:
+        progress_percent = round((terminal / total) * 100, 1)
+    else:
+        progress_percent = 0.0
+
+    return {
+        "total_jobs": total,
+        "queued_jobs": queued,
+        "running_jobs": running,
+        "completed_jobs": completed,
+        "failed_jobs": failed,
+        "cancelled_jobs": cancelled,
+        "terminal_jobs": terminal,
+        "progress_percent": progress_percent,
+    }
+
+
+def scheduler_loop() -> None:
+    global active_job_id
+
+    while True:
+        next_job_id: Optional[str] = None
+
+        with jobs_cv:
+            while next_job_id is None:
+                if active_job_id is None:
+                    while queued_job_ids:
+                        candidate_id = queued_job_ids.pop(0)
+                        candidate = jobs.get(candidate_id)
+                        if candidate is not None and candidate.status == "queued":
+                            next_job_id = candidate_id
+                            active_job_id = candidate_id
+                            break
+
+                if next_job_id is None:
+                    jobs_cv.wait()
+
+        run_job(next_job_id)
+
+
+def ensure_scheduler_started() -> None:
+    global scheduler_thread
+
+    with jobs_lock:
+        if scheduler_thread is not None and scheduler_thread.is_alive():
+            return
+
+        scheduler_thread = threading.Thread(
+            target=scheduler_loop,
+            daemon=True,
+            name="job-scheduler",
+        )
+        scheduler_thread.start()
+
+
 def resolve_auth_credentials(payload: dict[str, object]) -> tuple[Optional[str], Optional[str]]:
     username_input = str(payload.get("username", "")).strip()
     password_input = payload.get("password")
@@ -208,19 +292,34 @@ def resolve_auth_credentials(payload: dict[str, object]) -> tuple[Optional[str],
 def run_job(job_id: str) -> None:
     global active_job_id
 
-    with jobs_lock:
+    with jobs_cv:
         job = jobs.get(job_id)
         if job is None:
+            if active_job_id == job_id:
+                active_job_id = None
+                jobs_cv.notify_all()
             return
+
         job.status = "running"
         job.started_at = now_iso()
         job.message = "Launching ia-get..."
+
+        if job.cancel_requested:
+            job.status = "cancelled"
+            job.finished_at = now_iso()
+            job.message = "Download cancelled before start"
+            append_log_line_locked(job, "Job cancelled before launch")
+            if active_job_id == job_id:
+                active_job_id = None
+            prune_history_locked()
+            jobs_cv.notify_all()
+            return
 
     target_dir = Path(job.output_path)
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:  # pragma: no cover - depends on host FS permissions
-        with jobs_lock:
+        with jobs_cv:
             failed = jobs.get(job_id)
             if failed is None:
                 return
@@ -228,8 +327,11 @@ def run_job(job_id: str) -> None:
             failed.finished_at = now_iso()
             failed.return_code = -1
             failed.message = f"Cannot create target directory: {exc}"
+            append_log_line_locked(failed, f"Cannot create target directory: {exc}")
             if active_job_id == job_id:
                 active_job_id = None
+            prune_history_locked()
+            jobs_cv.notify_all()
         return
 
     command = [IA_GET_BIN]
@@ -253,7 +355,7 @@ def run_job(job_id: str) -> None:
             env=env,
         )
     except Exception as exc:  # pragma: no cover - process spawn failure is environment specific
-        with jobs_lock:
+        with jobs_cv:
             failed = jobs.get(job_id)
             if failed is None:
                 return
@@ -261,11 +363,14 @@ def run_job(job_id: str) -> None:
             failed.finished_at = now_iso()
             failed.message = f"Failed to start ia-get: {exc}"
             failed.return_code = -1
+            append_log_line_locked(failed, f"Failed to start ia-get: {exc}")
             if active_job_id == job_id:
                 active_job_id = None
+            prune_history_locked()
+            jobs_cv.notify_all()
         return
 
-    with jobs_lock:
+    with jobs_cv:
         running_job = jobs.get(job_id)
         if running_job is None:
             process.terminate()
@@ -285,7 +390,7 @@ def run_job(job_id: str) -> None:
             except Exception as exc:
                 process.stdin.close()
                 process.terminate()
-                with jobs_lock:
+                with jobs_cv:
                     failed = jobs.get(job_id)
                     if failed is None:
                         return
@@ -294,12 +399,18 @@ def run_job(job_id: str) -> None:
                     failed.message = f"Failed to pass authentication secret to ia-get: {exc}"
                     failed.return_code = -1
                     failed.auth_password = None
+                    append_log_line_locked(
+                        failed,
+                        f"Failed to pass authentication secret to ia-get: {exc}",
+                    )
                     if active_job_id == job_id:
                         active_job_id = None
+                    prune_history_locked()
+                    jobs_cv.notify_all()
                 return
         process.stdin.close()
 
-    with jobs_lock:
+    with jobs_cv:
         running_job = jobs.get(job_id)
         if running_job is not None:
             running_job.auth_password = None
@@ -311,7 +422,7 @@ def run_job(job_id: str) -> None:
                 if not clean_line:
                     continue
 
-                with jobs_lock:
+                with jobs_cv:
                     line_job = jobs.get(job_id)
                     if line_job is None:
                         continue
@@ -320,7 +431,7 @@ def run_job(job_id: str) -> None:
 
     return_code = process.wait()
 
-    with jobs_lock:
+    with jobs_cv:
         final_job = jobs.get(job_id)
         if final_job is None:
             return
@@ -346,6 +457,7 @@ def run_job(job_id: str) -> None:
         if active_job_id == job_id:
             active_job_id = None
         prune_history_locked()
+        jobs_cv.notify_all()
 
 
 @app.get("/")
@@ -384,22 +496,25 @@ def get_config() -> tuple[dict[str, object], int]:
 
 @app.get("/api/jobs")
 def list_jobs() -> tuple[dict[str, object], int]:
-    with jobs_lock:
+    with jobs_cv:
         ordered_jobs = sorted(jobs.values(), key=lambda item: item.created_at, reverse=True)
+        queue_positions = build_queue_positions_locked()
         payload = {
             "active_job_id": active_job_id,
-            "jobs": [serialize_job(job) for job in ordered_jobs],
+            "jobs": [serialize_job(job, queue_positions.get(job.id)) for job in ordered_jobs],
+            "queue_stats": build_queue_stats_locked(),
         }
     return payload, 200
 
 
 @app.get("/api/jobs/<job_id>")
 def get_job(job_id: str) -> tuple[dict[str, object], int]:
-    with jobs_lock:
+    with jobs_cv:
         job = jobs.get(job_id)
         if job is None:
             return {"error": "Job not found"}, 404
-        return {"job": serialize_job(job)}, 200
+        queue_position = build_queue_positions_locked().get(job.id)
+        return {"job": serialize_job(job, queue_position)}, 200
 
 
 @app.get("/api/jobs/<job_id>/logs")
@@ -410,7 +525,7 @@ def get_job_logs(job_id: str) -> tuple[dict[str, object], int]:
     except ValueError:
         return {"error": "offset must be an integer"}, 400
 
-    with jobs_lock:
+    with jobs_cv:
         job = jobs.get(job_id)
         if job is None:
             return {"error": "Job not found"}, 404
@@ -431,7 +546,7 @@ def get_job_logs(job_id: str) -> tuple[dict[str, object], int]:
 
 @app.post("/api/jobs")
 def create_job() -> tuple[dict[str, object], int]:
-    global active_job_id
+    ensure_scheduler_started()
 
     payload = request.get_json(silent=True) or {}
     url = str(payload.get("url", "")).strip()
@@ -454,15 +569,7 @@ def create_job() -> tuple[dict[str, object], int]:
     except ValueError as exc:
         return {"error": str(exc)}, 400
 
-    with jobs_lock:
-        if active_job_id is not None:
-            active = jobs.get(active_job_id)
-            if active is not None and active.status == "running":
-                return {
-                    "error": "A download is already in progress",
-                    "active_job_id": active_job_id,
-                }, 409
-
+    with jobs_cv:
         job_id = uuid.uuid4().hex[:12]
         job = Job(
             id=job_id,
@@ -475,20 +582,46 @@ def create_job() -> tuple[dict[str, object], int]:
             message="Queued",
         )
         jobs[job_id] = job
-        active_job_id = job_id
+        queued_job_ids.append(job_id)
+        queue_position = len(queued_job_ids)
+        job.message = f"Queued (position {queue_position})"
+        jobs_cv.notify_all()
 
-    worker = threading.Thread(target=run_job, args=(job_id,), daemon=True)
-    worker.start()
+        response_payload = {
+            "job": serialize_job(job, queue_position),
+            "queue_stats": build_queue_stats_locked(),
+        }
 
-    return {"job": serialize_job(job)}, 201
+    return response_payload, 201
 
 
 @app.post("/api/jobs/<job_id>/cancel")
 def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
-    with jobs_lock:
+    with jobs_cv:
         job = jobs.get(job_id)
         if job is None:
             return {"error": "Job not found"}, 404
+
+        if job.status == "queued":
+            job.cancel_requested = True
+            if job_id in queued_job_ids:
+                queued_job_ids.remove(job_id)
+                job.status = "cancelled"
+                job.finished_at = now_iso()
+                job.message = "Download cancelled"
+                append_log_line_locked(job, "Cancelled before starting")
+                prune_history_locked()
+            else:
+                job.message = "Cancellation requested"
+                append_log_line_locked(job, "Cancellation requested before start")
+
+            jobs_cv.notify_all()
+            queue_position = build_queue_positions_locked().get(job.id)
+            return {
+                "ok": True,
+                "job": serialize_job(job, queue_position),
+                "queue_stats": build_queue_stats_locked(),
+            }, 200
 
         if job.status != "running":
             return {"error": f"Job is {job.status} and cannot be cancelled"}, 409
@@ -496,6 +629,8 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
         job.cancel_requested = True
         process = job.process
         append_log_line_locked(job, "Cancellation requested")
+        queue_position = build_queue_positions_locked().get(job.id)
+        jobs_cv.notify_all()
 
     if process is not None and process.poll() is None:
         try:
@@ -503,11 +638,19 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
         except Exception:
             process.terminate()
 
-    return {"ok": True}, 200
+    with jobs_cv:
+        queue_stats = build_queue_stats_locked()
+
+    return {
+        "ok": True,
+        "job": serialize_job(job, queue_position),
+        "queue_stats": queue_stats,
+    }, 200
 
 
 def main() -> None:
     DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    ensure_scheduler_started()
     app.run(host=HOST, port=PORT)
 
 

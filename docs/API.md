@@ -19,10 +19,21 @@ Base URL: `http://<host>:8080`
 ## Jobs
 
 - `GET /api/jobs`
-  - Returns recent jobs and current active job ID.
+  - Returns recent jobs, current active job ID, and queue statistics.
+  - Each job includes `queue_position` when status is `queued`.
+  - Includes `queue_stats`:
+    - `total_jobs`
+    - `queued_jobs`
+    - `running_jobs`
+    - `completed_jobs`
+    - `failed_jobs`
+    - `cancelled_jobs`
+    - `terminal_jobs`
+    - `progress_percent`
 
 - `POST /api/jobs`
-  - Starts a new job (only one running job allowed).
+  - Enqueues a new download job.
+  - The scheduler runs one queued job at a time.
   - Body:
 
 ```json
@@ -48,7 +59,7 @@ Base URL: `http://<host>:8080`
     - `next_offset`: pass this value into your next request
 
 - `POST /api/jobs/<job_id>/cancel`
-  - Sends cancellation signal (`SIGINT`) to running `ia-get`.
+  - Cancels a queued job immediately, or sends cancellation signal (`SIGINT`) to a running job.
 
 ## Job status values
 
