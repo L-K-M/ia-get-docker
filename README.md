@@ -12,15 +12,13 @@ Containerized wrapper around [`L-K-M/ia-get`](https://github.com/L-K-M/ia-get) (
 cp .env.example .env
 ```
 
-2.a Build and run:
+2. Build and run:
 
 ```bash
+# For first-time runs
 docker compose up -d --build
-```
 
-2.b Update:
-
-```bash
+# For subsequent runs
 docker compose down
 docker compose build --no-cache
 docker compose up -d
