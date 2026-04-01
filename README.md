@@ -27,7 +27,7 @@ docker compose up -d
 3. Open the web UI:
 
 ```text
-http://<your-host-ip>:8080
+http://<your-host-ip>:14637
 ```
 
 4. Paste an archive URL like:
@@ -44,7 +44,7 @@ Key values in `.env`:
 
 - `IA_GET_REPO`: Upstream git repo used for `ia-get` build. Default: `https://github.com/L-K-M/ia-get.git`
 - `IA_GET_REF`: Upstream branch/tag of `ia-get` to build. Default: `main`
-- `WEB_PORT`: Host port mapped to UI/API. Default: `8080`
+- `WEB_PORT`: Host port mapped to UI/API. Default: `14637`
 - `DOWNLOADS_PATH`: Host path bind-mounted to `/downloads`. Default: `./downloads`
 - `PUID` / `PGID`: Runtime user/group IDs for file ownership. Default: `568` / `568`
 - `TZ`: Container timezone. Default: `UTC`

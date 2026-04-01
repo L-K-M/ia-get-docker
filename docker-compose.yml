@@ -17,7 +17,7 @@ services:
       IA_PASSWORD: ${IA_PASSWORD:-}
       TZ: ${TZ:-UTC}
     ports:
-      - "${WEB_PORT:-8080}:8080"
+      - "${WEB_PORT:-14637}:8080"
     volumes:
       - "${DOWNLOADS_PATH:-./downloads}:/downloads"
     user: "${PUID:-568}:${PGID:-568}"
