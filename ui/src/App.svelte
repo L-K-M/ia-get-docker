@@ -36,6 +36,7 @@
   let downloadRoot = '/downloads';
   let defaultAuthHint = 'Loading container defaults...';
   let containerDefaultUsername = '';
+  let hasContainerDefaultPassword = false;
 
   let showAddDialog = false;
   let addUrl = '';
@@ -48,6 +49,7 @@
   let detailLogs = ['Select a download to view details and logs.'];
   let detailLogOffset = 0;
   let detailLogOutput;
+  let addUrlInput;
 
   let uiSettings = {
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
@@ -65,13 +67,10 @@
   let draftDefaultUsername = '';
 
   const columns = [
-    { key: 'status', label: 'Status', width: '13%', className: 'col-status' },
-    { key: 'identifier', label: 'Identifier', width: '18%', className: 'col-identifier' },
-    { key: 'destination', label: 'Destination', width: '18%', className: 'col-destination' },
-    { key: 'progress', label: 'Progress', width: '19%', className: 'col-progress' },
-    { key: 'files', label: 'Files', width: '10%', className: 'col-files' },
-    { key: 'created', label: 'Created', width: '14%', className: 'col-created' },
-    { key: 'actions', label: 'Actions', width: '8%', className: 'col-actions' }
+    { key: 'name', label: 'Name', width: '30%', className: 'col-name' },
+    { key: 'progress', label: 'Progress', width: '40%', className: 'col-progress' },
+    { key: 'files', label: 'Files', width: '12%', className: 'col-files' },
+    { key: 'actions', label: 'Actions', width: '18%', className: 'col-actions' }
   ];
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
@@ -96,6 +95,12 @@
   function resetDetailLogs(message = 'Select a download to view details and logs.') {
     detailLogs = [message];
     detailLogOffset = 0;
+  }
+
+  function focusAddUrlInput() {
+    tick().then(() => {
+      setTimeout(() => addUrlInput?.focus(), 0);
+    });
   }
 
   function loadStoredUiSettings() {
@@ -182,8 +187,9 @@
   function applyConfig(config) {
     downloadRoot = config.download_dir || '/downloads';
     containerDefaultUsername = String(config.default_username || '').trim();
+    hasContainerDefaultPassword = Boolean(config.has_default_password);
     const hasDefaultUser = Boolean(containerDefaultUsername);
-    const hasDefaultPass = Boolean(config.has_default_password);
+    const hasDefaultPass = hasContainerDefaultPassword;
 
     if (!hasDefaultUser && !hasDefaultPass) {
       defaultAuthHint = 'No container auth defaults configured.';
@@ -347,6 +353,50 @@
     }
   }
 
+  async function queueDownload(requestBody) {
+    const payload = await api('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    selectedJobId = payload.job.id;
+    await refreshJobsList();
+    await loadSelectedJobLogs(true);
+  }
+
+  async function handleRowRetry(event, job) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!job || job.status !== 'failed') {
+      return;
+    }
+
+    if (
+      job.auth_enabled &&
+      (!hasContainerDefaultPassword || containerDefaultUsername !== (job.auth_username || ''))
+    ) {
+      addUrl = job.url;
+      addSubdir = job.output_subdir || '';
+      addUsername = job.auth_username || '';
+      addPassword = '';
+      addError = 'Enter password, then click Add to Queue to retry this download.';
+      showAddDialog = true;
+      focusAddUrlInput();
+      return;
+    }
+
+    try {
+      await queueDownload({
+        url: job.url,
+        subdir: job.output_subdir || ''
+      });
+    } catch (error) {
+      setFlash(error.message, true);
+    }
+  }
+
   async function handleRowClick(jobId) {
     if (selectedJobId !== jobId) {
       selectedJobId = jobId;
@@ -364,6 +414,7 @@
     addPassword = '';
     addError = '';
     showAddDialog = true;
+    focusAddUrlInput();
   }
 
   async function submitNewDownload() {
@@ -387,23 +438,19 @@
     }
 
     try {
-      const payload = await api('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-
+      await queueDownload(requestBody);
       showAddDialog = false;
-      selectedJobId = payload.job.id;
       addPassword = '';
-
-      await refreshJobsList();
-      await loadSelectedJobLogs(true);
     } catch (error) {
       addError = error.message;
     } finally {
       addSubmitting = false;
     }
+  }
+
+  function handleAddDialogSubmit(event) {
+    event.preventDefault();
+    void submitNewDownload();
   }
 
   async function pollData() {
@@ -477,35 +524,36 @@
             loadingText="Loading queue..."
             empty={!isLoading && jobs.length === 0}
             emptyText="No downloads queued yet. Use 'Add Download...' to start."
-            emptyColspan={7}
+            emptyColspan={4}
           >
             {#each jobs.slice(0, uiSettings.recentJobsLimit) as job}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <tr class:selected={selectedJobId === job.id} onclick={() => handleRowClick(job.id)}>
-                <td class="col-status">{describeStatus(job)}</td>
-                <td class="col-identifier">{job.identifier}</td>
-                <td class="col-destination">{job.output_subdir}</td>
+                <td class="col-name">{job.identifier}</td>
                 <td class="col-progress">
                   <div class="row-progressbar">
                     <ProgressBar
                       value={getJobProgressNumber(job)}
                       max={100}
-                      height={10}
+                      height={16}
                       title={describeProgress(job)}
                       ariaLabel="Download progress"
                     />
                   </div>
                 </td>
                 <td class="col-files">{job.completed_files}/{job.total_files}</td>
-                <td class="col-created">{formatTime(job.created_at)}</td>
                 <td class="col-actions">
-                  <Button
-                    onclick={(event) => handleRowCancel(event, job.id)}
-                    disabled={!canCancel(job)}
-                  >
-                    Cancel
-                  </Button>
+                  {#if job.status === 'failed'}
+                    <Button onclick={(event) => handleRowRetry(event, job)}>Try Again</Button>
+                  {:else}
+                    <Button
+                      onclick={(event) => handleRowCancel(event, job.id)}
+                      disabled={!canCancel(job)}
+                    >
+                      Cancel
+                    </Button>
+                  {/if}
                 </td>
               </tr>
             {/each}
@@ -518,7 +566,7 @@
           {#if selectedJob}
             <div class="details-grid">
               <p><strong>Status:</strong> {describeStatus(selectedJob)}</p>
-              <p><strong>Identifier:</strong> {selectedJob.identifier}</p>
+              <p><strong>Name:</strong> {selectedJob.identifier}</p>
               <p><strong>URL:</strong> {selectedJob.url}</p>
               <p><strong>Output:</strong> {selectedJob.output_subdir}</p>
               <p><strong>Progress:</strong> {describeProgress(selectedJob)}</p>
@@ -563,7 +611,7 @@
 
 {#if showAddDialog}
   <MovableDialog title="Queue Download" onclose={() => (showAddDialog = false)} width="540px">
-    <div class="dialog-form">
+    <form class="dialog-form" onsubmit={handleAddDialogSubmit}>
       <div class="s7-form-group">
         <label for="add-url">Archive URL</label>
         <input
@@ -571,6 +619,7 @@
           class="s7-input"
           type="url"
           placeholder="https://archive.org/details/En-ROMs"
+          bind:this={addUrlInput}
           bind:value={addUrl}
         />
       </div>
@@ -604,12 +653,12 @@
       {/if}
 
       <div class="dialog-actions">
-        <Button onclick={() => (showAddDialog = false)}>Cancel</Button>
-        <Button variant="primary" onclick={submitNewDownload} disabled={addSubmitting}>
+        <Button type="button" onclick={() => (showAddDialog = false)}>Cancel</Button>
+        <Button type="submit" variant="primary" disabled={addSubmitting}>
           {addSubmitting ? 'Queueing...' : 'Add to Queue'}
         </Button>
       </div>
-    </div>
+    </form>
   </MovableDialog>
 {/if}
 

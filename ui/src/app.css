@@ -138,6 +138,7 @@ body {
 .jobs-table td.col-progress {
   overflow: visible;
   text-overflow: clip;
+  padding-right: 16px;
 }
 
 .jobs-table td.col-actions {
@@ -145,11 +146,14 @@ body {
 }
 
 .jobs-table td.col-actions button {
-  min-width: 120px;
+  min-width: 152px;
+  white-space: nowrap;
 }
 
 .row-progressbar {
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .details-grid {
