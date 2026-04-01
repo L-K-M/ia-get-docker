@@ -10,7 +10,7 @@
     TitleBar
   } from '@lkmc/system7-ui';
 
-  const UI_SETTINGS_KEY = 'ia-get-ui-settings-v2';
+  const UI_SETTINGS_KEY = 'ia-get-ui-settings-v3';
   const DEFAULT_POLL_INTERVAL_MS = 1200;
   const DEFAULT_RECENT_JOBS_LIMIT = 12;
 
@@ -45,12 +45,8 @@
   let addError = '';
   let addSubmitting = false;
 
-  let showDetailsDialog = false;
-  let detailJobId = null;
-  let detailJob = null;
-  let detailLogs = [];
+  let detailLogs = ['Select a download to view details and logs.'];
   let detailLogOffset = 0;
-  let detailLoading = false;
   let detailLogOutput;
 
   let uiSettings = {
@@ -69,19 +65,20 @@
   let draftDefaultUsername = '';
 
   const columns = [
-    { key: 'status', label: 'Status', width: '15%', className: 'col-status' },
-    { key: 'identifier', label: 'Identifier', width: '22%', className: 'col-identifier' },
-    { key: 'destination', label: 'Destination', width: '20%', className: 'col-destination' },
-    { key: 'progress', label: 'Progress', width: '15%', className: 'col-progress' },
-    { key: 'files', label: 'Files', width: '11%', className: 'col-files' },
-    { key: 'created', label: 'Created', width: '17%', className: 'col-created' }
+    { key: 'status', label: 'Status', width: '13%', className: 'col-status' },
+    { key: 'identifier', label: 'Identifier', width: '18%', className: 'col-identifier' },
+    { key: 'destination', label: 'Destination', width: '18%', className: 'col-destination' },
+    { key: 'progress', label: 'Progress', width: '19%', className: 'col-progress' },
+    { key: 'files', label: 'Files', width: '10%', className: 'col-files' },
+    { key: 'created', label: 'Created', width: '14%', className: 'col-created' },
+    { key: 'actions', label: 'Actions', width: '8%', className: 'col-actions' }
   ];
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
   $: footerSummary =
     queueStats.total_jobs === 0
       ? 'No downloads queued yet.'
-      : `${queueStats.terminal_jobs}/${queueStats.total_jobs} finished  |  ${queueStats.running_jobs} running  |  ${queueStats.queued_jobs} queued`;
+      : `${queueStats.terminal_jobs}/${queueStats.total_jobs} finished | ${queueStats.running_jobs} running | ${queueStats.queued_jobs} queued`;
 
   function setFlash(message, isError = false) {
     flashMessage = message;
@@ -94,6 +91,11 @@
       return fallback;
     }
     return Math.max(min, Math.min(max, parsed));
+  }
+
+  function resetDetailLogs(message = 'Select a download to view details and logs.') {
+    detailLogs = [message];
+    detailLogOffset = 0;
   }
 
   function loadStoredUiSettings() {
@@ -157,6 +159,7 @@
       defaultSubdir: '',
       defaultUsername: ''
     };
+
     persistUiSettings();
     draftPollIntervalMs = uiSettings.pollIntervalMs;
     draftRecentJobsLimit = uiSettings.recentJobsLimit;
@@ -198,20 +201,24 @@
     activeJobId = payload.active_job_id || null;
     queueStats = payload.queue_stats || queueStats;
 
+    let selectionChanged = false;
+
     if (selectedJobId && !jobs.find((item) => item.id === selectedJobId)) {
       selectedJobId = null;
+      selectionChanged = true;
     }
 
     if (!selectedJobId && jobs.length > 0) {
       selectedJobId = jobs[0].id;
+      selectionChanged = true;
+    }
+
+    if (!selectedJobId) {
+      resetDetailLogs();
     }
 
     isLoading = false;
-  }
-
-  async function handleRowClick(jobId) {
-    selectedJobId = jobId;
-    await openDetailsDialog(jobId);
+    return selectionChanged;
   }
 
   function formatTime(isoDate) {
@@ -288,17 +295,66 @@
     return job.status === 'queued' || job.status === 'running';
   }
 
-  async function cancelJob(jobId) {
-    if (!jobId) {
+  async function loadSelectedJobLogs(reset = false) {
+    if (!selectedJobId) {
       return;
     }
 
-    await api(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
-    await refreshJobsList();
-
-    if (showDetailsDialog && detailJobId === jobId) {
-      await refreshDetailDialog(false);
+    if (reset) {
+      detailLogs = [];
+      detailLogOffset = 0;
     }
+
+    const logsPayload = await api(`/api/jobs/${selectedJobId}/logs?offset=${detailLogOffset}`);
+    const newLines = logsPayload.lines || [];
+
+    if (reset) {
+      detailLogs = newLines.length > 0 ? [...newLines] : ['No logs yet.'];
+    } else if (newLines.length > 0) {
+      if (detailLogs.length === 1 && detailLogs[0] === 'No logs yet.') {
+        detailLogs = [];
+      }
+      detailLogs = [...detailLogs, ...newLines];
+    } else if (detailLogs.length === 0) {
+      detailLogs = ['No logs yet.'];
+    }
+
+    detailLogOffset = logsPayload.next_offset || detailLogOffset;
+
+    if (uiSettings.autoScrollLogs && newLines.length > 0 && detailLogOutput) {
+      await tick();
+      detailLogOutput.scrollTop = detailLogOutput.scrollHeight;
+    }
+  }
+
+  async function cancelJob(jobId) {
+    await api(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+
+    const selectionChanged = await refreshJobsList();
+    if (selectedJobId) {
+      await loadSelectedJobLogs(selectionChanged || selectedJobId === jobId);
+    }
+  }
+
+  async function handleRowCancel(event, jobId) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      await cancelJob(jobId);
+    } catch (error) {
+      setFlash(error.message, true);
+    }
+  }
+
+  async function handleRowClick(jobId) {
+    if (selectedJobId !== jobId) {
+      selectedJobId = jobId;
+      await loadSelectedJobLogs(true);
+      return;
+    }
+
+    await loadSelectedJobLogs(false);
   }
 
   function openAddDownloadDialog() {
@@ -340,7 +396,9 @@
       showAddDialog = false;
       selectedJobId = payload.job.id;
       addPassword = '';
+
       await refreshJobsList();
+      await loadSelectedJobLogs(true);
     } catch (error) {
       addError = error.message;
     } finally {
@@ -348,80 +406,11 @@
     }
   }
 
-  async function cancelSelectedJob() {
-    if (!selectedJobId || !selectedJob) {
-      return;
-    }
-
-    try {
-      await cancelJob(selectedJobId);
-    } catch (error) {
-      setFlash(error.message, true);
-    }
-  }
-
-  async function openDetailsDialog(jobId) {
-    if (!jobId) {
-      return;
-    }
-
-    detailJobId = jobId;
-    detailJob = jobs.find((item) => item.id === jobId) || null;
-    detailLogs = [];
-    detailLogOffset = 0;
-    showDetailsDialog = true;
-    await refreshDetailDialog(true);
-  }
-
-  async function refreshDetailDialog(resetLogs = false) {
-    if (!detailJobId) {
-      return;
-    }
-
-    if (resetLogs) {
-      detailLogs = [];
-      detailLogOffset = 0;
-    }
-
-    detailLoading = true;
-
-    try {
-      const [jobPayload, logsPayload] = await Promise.all([
-        api(`/api/jobs/${detailJobId}`),
-        api(`/api/jobs/${detailJobId}/logs?offset=${detailLogOffset}`)
-      ]);
-
-      detailJob = jobPayload.job;
-      const newLines = logsPayload.lines || [];
-
-      if (resetLogs) {
-        detailLogs = newLines.length > 0 ? [...newLines] : ['No logs yet.'];
-      } else if (newLines.length > 0) {
-        if (detailLogs.length === 1 && detailLogs[0] === 'No logs yet.') {
-          detailLogs = [];
-        }
-        detailLogs = [...detailLogs, ...newLines];
-      }
-
-      detailLogOffset = logsPayload.next_offset || detailLogOffset;
-
-      if (uiSettings.autoScrollLogs && newLines.length > 0 && detailLogOutput) {
-        await tick();
-        detailLogOutput.scrollTop = detailLogOutput.scrollHeight;
-      }
-    } catch (error) {
-      setFlash(error.message, true);
-    } finally {
-      detailLoading = false;
-    }
-  }
-
   async function pollData() {
     try {
-      await refreshJobsList();
-
-      if (showDetailsDialog && detailJobId) {
-        await refreshDetailDialog(false);
+      const selectionChanged = await refreshJobsList();
+      if (selectedJobId) {
+        await loadSelectedJobLogs(selectionChanged);
       }
     } catch (error) {
       setFlash(error.message, true);
@@ -475,49 +464,85 @@
 
       <div class="toolbar">
         <Button onclick={openAddDownloadDialog}>Add Download...</Button>
-        <Button onclick={() => openDetailsDialog(selectedJobId)} disabled={!selectedJob}>Details</Button>
-        <Button onclick={cancelSelectedJob} disabled={!canCancel(selectedJob)}>Cancel</Button>
-        <Button onclick={pollData}>Refresh</Button>
+        <div class="toolbar-spacer"></div>
         <Button onclick={openSettings}>Settings</Button>
       </div>
 
-      <div class="table-wrap">
-        <DataTable
-          class="jobs-table"
-          columns={columns}
-          loading={isLoading && jobs.length === 0}
-          loadingText="Loading queue..."
-          empty={!isLoading && jobs.length === 0}
-          emptyText="No downloads queued yet. Use 'Add Download...' to start."
-          emptyColspan={6}
-        >
-          {#each jobs.slice(0, uiSettings.recentJobsLimit) as job}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <tr
-              class:selected={selectedJobId === job.id}
-              onclick={() => handleRowClick(job.id)}
-            >
-              <td class="col-status">{describeStatus(job)}</td>
-              <td class="col-identifier">{job.identifier}</td>
-              <td class="col-destination">{job.output_subdir}</td>
-              <td class="col-progress">
-                <div class="row-progress">
-                  <ProgressBar
-                    value={getJobProgressNumber(job)}
-                    max={100}
-                    height={10}
-                    title="Download progress"
-                    ariaLabel="Download progress"
-                  />
-                  <span>{describeProgress(job)}</span>
-                </div>
-              </td>
-              <td class="col-files">{job.completed_files}/{job.total_files}</td>
-              <td class="col-created">{formatTime(job.created_at)}</td>
-            </tr>
-          {/each}
-        </DataTable>
+      <div class="workspace">
+        <section class="table-pane">
+          <DataTable
+            class="jobs-table"
+            columns={columns}
+            loading={isLoading && jobs.length === 0}
+            loadingText="Loading queue..."
+            empty={!isLoading && jobs.length === 0}
+            emptyText="No downloads queued yet. Use 'Add Download...' to start."
+            emptyColspan={7}
+          >
+            {#each jobs.slice(0, uiSettings.recentJobsLimit) as job}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <tr class:selected={selectedJobId === job.id} onclick={() => handleRowClick(job.id)}>
+                <td class="col-status">{describeStatus(job)}</td>
+                <td class="col-identifier">{job.identifier}</td>
+                <td class="col-destination">{job.output_subdir}</td>
+                <td class="col-progress">
+                  <div class="row-progressbar">
+                    <ProgressBar
+                      value={getJobProgressNumber(job)}
+                      max={100}
+                      height={10}
+                      title={describeProgress(job)}
+                      ariaLabel="Download progress"
+                    />
+                  </div>
+                </td>
+                <td class="col-files">{job.completed_files}/{job.total_files}</td>
+                <td class="col-created">{formatTime(job.created_at)}</td>
+                <td class="col-actions">
+                  <Button
+                    onclick={(event) => handleRowCancel(event, job.id)}
+                    disabled={!canCancel(job)}
+                  >
+                    Cancel
+                  </Button>
+                </td>
+              </tr>
+            {/each}
+          </DataTable>
+        </section>
+
+        <aside class="details-pane">
+          <h2>Download Details</h2>
+
+          {#if selectedJob}
+            <div class="details-grid">
+              <p><strong>Status:</strong> {describeStatus(selectedJob)}</p>
+              <p><strong>Identifier:</strong> {selectedJob.identifier}</p>
+              <p><strong>URL:</strong> {selectedJob.url}</p>
+              <p><strong>Output:</strong> {selectedJob.output_subdir}</p>
+              <p><strong>Progress:</strong> {describeProgress(selectedJob)}</p>
+              <p><strong>Files:</strong> {selectedJob.completed_files}/{selectedJob.total_files}</p>
+              <p><strong>Created:</strong> {formatTime(selectedJob.created_at)}</p>
+              <p><strong>Started:</strong> {formatTime(selectedJob.started_at)}</p>
+              <p><strong>Finished:</strong> {formatTime(selectedJob.finished_at)}</p>
+              <p><strong>Auth:</strong> {selectedJob.auth_enabled ? selectedJob.auth_username : 'public'}</p>
+              <p><strong>Message:</strong> {selectedJob.message || '--'}</p>
+            </div>
+
+            <ProgressBar
+              value={getJobProgressNumber(selectedJob)}
+              max={100}
+              height={16}
+              title="Selected job progress"
+              ariaLabel="Selected job progress"
+            />
+
+            <pre class="details-logs" bind:this={detailLogOutput}>{detailLogs.join('\n')}</pre>
+          {:else}
+            <p class="hint">Select a download to view details and logs.</p>
+          {/if}
+        </aside>
       </div>
     </main>
 
@@ -537,7 +562,7 @@
 </div>
 
 {#if showAddDialog}
-  <MovableDialog title="Queue Download" onclose={() => (showAddDialog = false)} width="520px">
+  <MovableDialog title="Queue Download" onclose={() => (showAddDialog = false)} width="540px">
     <div class="dialog-form">
       <div class="s7-form-group">
         <label for="add-url">Archive URL</label>
@@ -588,56 +613,8 @@
   </MovableDialog>
 {/if}
 
-{#if showDetailsDialog}
-  <MovableDialog
-    title={detailJob ? `Download ${detailJob.id}` : 'Download Details'}
-    onclose={() => (showDetailsDialog = false)}
-    width="760px"
-  >
-    <div class="details-dialog">
-      {#if detailJob}
-        <div class="details-grid">
-          <p><strong>Status:</strong> {describeStatus(detailJob)}</p>
-          <p><strong>Identifier:</strong> {detailJob.identifier}</p>
-          <p><strong>URL:</strong> {detailJob.url}</p>
-          <p><strong>Output:</strong> {detailJob.output_subdir}</p>
-          <p><strong>Progress:</strong> {describeProgress(detailJob)}</p>
-          <p><strong>Files:</strong> {detailJob.completed_files}/{detailJob.total_files}</p>
-          <p><strong>Created:</strong> {formatTime(detailJob.created_at)}</p>
-          <p><strong>Started:</strong> {formatTime(detailJob.started_at)}</p>
-          <p><strong>Finished:</strong> {formatTime(detailJob.finished_at)}</p>
-          <p><strong>Auth:</strong> {detailJob.auth_enabled ? detailJob.auth_username : 'public'}</p>
-          <p><strong>Message:</strong> {detailJob.message || '--'}</p>
-        </div>
-
-        <div class="details-progress">
-          <ProgressBar
-            value={Number(detailJob.progress_percent || 0)}
-            max={100}
-            height={16}
-            title="Job progress"
-            ariaLabel="Job progress"
-          />
-        </div>
-
-        <pre class="details-logs" bind:this={detailLogOutput}>{detailLogs.join('\n')}</pre>
-      {:else}
-        <p class="hint">Loading details...</p>
-      {/if}
-
-      <div class="dialog-actions">
-        {#if detailJob}
-          <Button onclick={() => cancelJob(detailJob.id)} disabled={!canCancel(detailJob)}>Cancel</Button>
-        {/if}
-        <Button onclick={() => refreshDetailDialog(true)} disabled={detailLoading}>Refresh</Button>
-        <Button onclick={() => (showDetailsDialog = false)}>Close</Button>
-      </div>
-    </div>
-  </MovableDialog>
-{/if}
-
 {#if settingsOpen}
-  <MovableDialog title="UI Settings" onclose={() => (settingsOpen = false)} width="390px">
+  <MovableDialog title="UI Settings" onclose={() => (settingsOpen = false)} width="420px">
     <div class="settings-form">
       <div class="s7-form-group">
         <label for="poll-interval">Poll interval (ms)</label>
@@ -689,13 +666,11 @@
 
       <Checkbox
         checked={draftAutoScrollLogs}
-        label="Auto-scroll detail logs"
+        label="Auto-scroll logs"
         onchange={(checked) => (draftAutoScrollLogs = checked)}
       />
 
-      <p class="hint">
-        Settings are stored in your browser only. Passwords are never saved.
-      </p>
+      <p class="hint">Settings are stored in your browser only. Passwords are never saved.</p>
 
       <div class="dialog-actions settings-actions">
         <Button onclick={resetSettings}>Reset</Button>
