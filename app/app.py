@@ -6,6 +6,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,9 @@ class Job:
     completed_files: int = 0
     auth_username: Optional[str] = None
     auth_password: Optional[str] = field(default=None, repr=False)
+    retry_delay_minutes: int = 0
+    retry_count: int = 0
+    next_retry_at: Optional[str] = None
     cancel_requested: bool = False
     message: str = ""
     logs: list[str] = field(default_factory=list)
@@ -132,6 +136,9 @@ def serialize_job(job: Job, queue_position: Optional[int] = None) -> dict[str, o
         "queue_position": queue_position,
         "auth_enabled": bool(job.auth_username),
         "auth_username": job.auth_username,
+        "retry_delay_minutes": job.retry_delay_minutes,
+        "retry_count": job.retry_count,
+        "next_retry_at": job.next_retry_at,
         "cancel_requested": job.cancel_requested,
         "message": job.message,
         "progress_percent": percent,
@@ -185,6 +192,7 @@ def build_queue_positions_locked() -> dict[str, int]:
 def build_queue_stats_locked() -> dict[str, object]:
     total = len(jobs)
     queued = 0
+    retry_wait = 0
     running = 0
     completed = 0
     failed = 0
@@ -193,6 +201,9 @@ def build_queue_stats_locked() -> dict[str, object]:
     for job in jobs.values():
         if job.status == "queued":
             queued += 1
+        elif job.status == "retry_wait":
+            queued += 1
+            retry_wait += 1
         elif job.status == "running":
             running += 1
         elif job.status == "completed":
@@ -222,6 +233,7 @@ def build_queue_stats_locked() -> dict[str, object]:
     return {
         "total_jobs": total,
         "queued_jobs": queued,
+        "retry_wait_jobs": retry_wait,
         "running_jobs": running,
         "completed_jobs": completed,
         "failed_jobs": failed,
@@ -300,6 +312,62 @@ def resolve_auth_credentials(payload: dict[str, object]) -> tuple[Optional[str],
     return DEFAULT_IA_USERNAME, DEFAULT_IA_PASSWORD
 
 
+def resolve_retry_delay_minutes(payload: dict[str, object]) -> int:
+    raw_value = payload.get("retry_delay_minutes", 0)
+    if raw_value is None or raw_value == "":
+        return 0
+
+    try:
+        retry_minutes = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError("retry_delay_minutes must be an integer") from None
+
+    if retry_minutes < 0:
+        raise ValueError("retry_delay_minutes cannot be negative")
+
+    if retry_minutes > 1440:
+        raise ValueError("retry_delay_minutes cannot exceed 1440")
+
+    return retry_minutes
+
+
+def schedule_retry_after_delay(job_id: str, delay_seconds: int) -> None:
+    def retry_worker() -> None:
+        deadline = time.monotonic() + max(0, delay_seconds)
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            time.sleep(min(remaining, 5.0))
+
+            with jobs_cv:
+                job = jobs.get(job_id)
+                if job is None or job.status != "retry_wait" or job.cancel_requested:
+                    return
+
+        with jobs_cv:
+            job = jobs.get(job_id)
+            if job is None or job.status != "retry_wait" or job.cancel_requested:
+                return
+
+            job.status = "queued"
+            job.next_retry_at = None
+            if job.id not in queued_job_ids:
+                queued_job_ids.append(job.id)
+            queue_position = len(queued_job_ids)
+            job.message = f"Queued for retry (position {queue_position})"
+            append_log_line_locked(job, "Retry delay elapsed; job re-queued")
+            jobs_cv.notify_all()
+
+    threading.Thread(
+        target=retry_worker,
+        daemon=True,
+        name=f"retry-{job_id}",
+    ).start()
+
+
 def run_job(job_id: str) -> None:
     global active_job_id
 
@@ -313,6 +381,9 @@ def run_job(job_id: str) -> None:
 
         job.status = "running"
         job.started_at = now_iso()
+        job.finished_at = None
+        job.return_code = None
+        job.next_retry_at = None
         job.message = "Launching ia-get..."
 
         if job.cancel_requested:
@@ -325,6 +396,30 @@ def run_job(job_id: str) -> None:
             prune_history_locked()
             jobs_cv.notify_all()
             return
+
+        if job.auth_username and not job.auth_password:
+            if DEFAULT_IA_USERNAME == job.auth_username and DEFAULT_IA_PASSWORD:
+                job.auth_password = DEFAULT_IA_PASSWORD
+                append_log_line_locked(job, "Using container default password for retry")
+            else:
+                job.status = "failed"
+                job.finished_at = now_iso()
+                job.return_code = -1
+                job.next_retry_at = None
+                job.retry_delay_minutes = 0
+                job.message = (
+                    "Missing password for authenticated retry. "
+                    "Queue manually with password."
+                )
+                append_log_line_locked(
+                    job,
+                    "Cannot continue authenticated retry without password",
+                )
+                if active_job_id == job_id:
+                    active_job_id = None
+                prune_history_locked()
+                jobs_cv.notify_all()
+                return
 
     target_dir = Path(job.output_path)
     try:
@@ -442,6 +537,8 @@ def run_job(job_id: str) -> None:
 
     return_code = process.wait()
 
+    retry_delay_seconds = 0
+
     with jobs_cv:
         final_job = jobs.get(job_id)
         if final_job is None:
@@ -454,21 +551,42 @@ def run_job(job_id: str) -> None:
         if final_job.cancel_requested:
             final_job.status = "cancelled"
             final_job.message = "Download cancelled"
+            final_job.next_retry_at = None
         elif return_code == 0:
             final_job.status = "completed"
             if final_job.total_files > 0:
                 final_job.completed_files = final_job.total_files
             final_job.message = "Download complete"
+            final_job.next_retry_at = None
         else:
-            final_job.status = "failed"
-            final_job.message = f"ia-get exited with code {return_code}"
+            if final_job.retry_delay_minutes > 0:
+                final_job.status = "retry_wait"
+                final_job.retry_count += 1
+                retry_delay_seconds = final_job.retry_delay_minutes * 60
+                retry_at = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=retry_delay_seconds)
+                final_job.next_retry_at = (
+                    retry_at.isoformat(timespec="seconds").replace("+00:00", "Z")
+                )
+                final_job.message = (
+                    f"ia-get exited with code {return_code}; "
+                    f"retry #{final_job.retry_count} in {final_job.retry_delay_minutes} minute(s)"
+                )
+            else:
+                final_job.status = "failed"
+                final_job.message = f"ia-get exited with code {return_code}"
+                final_job.next_retry_at = None
 
         append_log_line_locked(final_job, f"Job finished with status: {final_job.status}")
+        if final_job.status == "retry_wait" and final_job.next_retry_at:
+            append_log_line_locked(final_job, f"Next retry at {final_job.next_retry_at}")
 
         if active_job_id == job_id:
             active_job_id = None
         prune_history_locked()
         jobs_cv.notify_all()
+
+    if retry_delay_seconds > 0:
+        schedule_retry_after_delay(job_id, retry_delay_seconds)
 
 
 @app.get("/")
@@ -576,6 +694,11 @@ def create_job() -> tuple[dict[str, object], int]:
         return {"error": str(exc)}, 400
 
     try:
+        retry_delay_minutes = resolve_retry_delay_minutes(payload)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    try:
         output_subdir, output_path = resolve_target_path(subdir, identifier)
     except ValueError as exc:
         return {"error": str(exc)}, 400
@@ -590,6 +713,7 @@ def create_job() -> tuple[dict[str, object], int]:
             output_path=str(output_path),
             auth_username=auth_username,
             auth_password=auth_password,
+            retry_delay_minutes=retry_delay_minutes,
             message="Queued",
         )
         jobs[job_id] = job
@@ -613,14 +737,22 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
         if job is None:
             return {"error": "Job not found"}, 404
 
-        if job.status == "queued":
+        if job.status in {"queued", "retry_wait"}:
             job.cancel_requested = True
             if job_id in queued_job_ids:
                 queued_job_ids.remove(job_id)
                 job.status = "cancelled"
                 job.finished_at = now_iso()
+                job.next_retry_at = None
                 job.message = "Download cancelled"
                 append_log_line_locked(job, "Cancelled before starting")
+                prune_history_locked()
+            elif job.status == "retry_wait":
+                job.status = "cancelled"
+                job.finished_at = now_iso()
+                job.next_retry_at = None
+                job.message = "Download cancelled"
+                append_log_line_locked(job, "Cancelled while waiting for retry")
                 prune_history_locked()
             else:
                 job.message = "Cancellation requested"

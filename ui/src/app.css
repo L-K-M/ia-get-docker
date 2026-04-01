@@ -146,12 +146,13 @@ body {
 }
 
 .jobs-table td.col-actions button {
-  min-width: 152px;
+  min-width: 172px;
   white-space: nowrap;
 }
 
 .row-progressbar {
-  width: 100%;
+  width: calc(100% - 28px);
+  max-width: 360px;
   min-width: 0;
   box-sizing: border-box;
 }

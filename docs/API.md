@@ -24,6 +24,7 @@ Base URL: `http://<host>:8080`
   - Includes `queue_stats`:
     - `total_jobs`
     - `queued_jobs`
+    - `retry_wait_jobs`
     - `running_jobs`
     - `completed_jobs`
     - `failed_jobs`
@@ -41,7 +42,8 @@ Base URL: `http://<host>:8080`
   "url": "https://archive.org/details/En-ROMs",
   "subdir": "optional/custom/subfolder",
   "username": "optional archive.org username",
-  "password": "optional archive.org password"
+  "password": "optional archive.org password",
+  "retry_delay_minutes": 10
 }
 ```
 
@@ -49,6 +51,7 @@ Base URL: `http://<host>:8080`
   - `subdir` is optional and must stay inside `/downloads`.
   - `username` and `password` are optional, but must be supplied together.
   - If omitted, server-side defaults (`IA_USERNAME`, `IA_PASSWORD`) are used when configured.
+  - `retry_delay_minutes` controls automatic requeue on failure (`0` disables auto-retry).
 
 - `GET /api/jobs/<job_id>`
   - Returns one job status.
@@ -68,3 +71,4 @@ Base URL: `http://<host>:8080`
 - `completed`
 - `failed`
 - `cancelled`
+- `retry_wait` (failed and waiting for delayed retry)

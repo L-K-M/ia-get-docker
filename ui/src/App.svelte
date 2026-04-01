@@ -56,7 +56,8 @@
     autoScrollLogs: true,
     recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
     defaultSubdir: '',
-    defaultUsername: ''
+    defaultUsername: '',
+    retryDelayMinutes: 10
   };
 
   let settingsOpen = false;
@@ -65,12 +66,13 @@
   let draftAutoScrollLogs = true;
   let draftDefaultSubdir = '';
   let draftDefaultUsername = '';
+  let draftRetryDelayMinutes = 10;
 
   const columns = [
     { key: 'name', label: 'Name', width: '30%', className: 'col-name' },
-    { key: 'progress', label: 'Progress', width: '40%', className: 'col-progress' },
+    { key: 'progress', label: 'Progress', width: '39%', className: 'col-progress' },
     { key: 'files', label: 'Files', width: '12%', className: 'col-files' },
-    { key: 'actions', label: 'Actions', width: '18%', className: 'col-actions' }
+    { key: 'actions', label: 'Actions', width: '19%', className: 'col-actions' }
   ];
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
@@ -116,7 +118,8 @@
         autoScrollLogs: Boolean(parsed.autoScrollLogs ?? true),
         recentJobsLimit: clampInteger(parsed.recentJobsLimit, 3, 50, DEFAULT_RECENT_JOBS_LIMIT),
         defaultSubdir: String(parsed.defaultSubdir || '').trim(),
-        defaultUsername: String(parsed.defaultUsername || '').trim()
+        defaultUsername: String(parsed.defaultUsername || '').trim(),
+        retryDelayMinutes: clampInteger(parsed.retryDelayMinutes, 0, 1440, 10)
       };
     } catch {
       uiSettings = {
@@ -124,7 +127,8 @@
         autoScrollLogs: true,
         recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
         defaultSubdir: '',
-        defaultUsername: ''
+        defaultUsername: '',
+        retryDelayMinutes: 10
       };
     }
   }
@@ -139,6 +143,7 @@
     draftAutoScrollLogs = uiSettings.autoScrollLogs;
     draftDefaultSubdir = uiSettings.defaultSubdir;
     draftDefaultUsername = uiSettings.defaultUsername;
+    draftRetryDelayMinutes = uiSettings.retryDelayMinutes;
     settingsOpen = true;
   }
 
@@ -148,7 +153,8 @@
       autoScrollLogs: Boolean(draftAutoScrollLogs),
       recentJobsLimit: clampInteger(draftRecentJobsLimit, 3, 50, DEFAULT_RECENT_JOBS_LIMIT),
       defaultSubdir: String(draftDefaultSubdir || '').trim(),
-      defaultUsername: String(draftDefaultUsername || '').trim()
+      defaultUsername: String(draftDefaultUsername || '').trim(),
+      retryDelayMinutes: clampInteger(draftRetryDelayMinutes, 0, 1440, 10)
     };
 
     persistUiSettings();
@@ -162,7 +168,8 @@
       autoScrollLogs: true,
       recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
       defaultSubdir: '',
-      defaultUsername: ''
+      defaultUsername: '',
+      retryDelayMinutes: 10
     };
 
     persistUiSettings();
@@ -171,6 +178,7 @@
     draftAutoScrollLogs = uiSettings.autoScrollLogs;
     draftDefaultSubdir = uiSettings.defaultSubdir;
     draftDefaultUsername = uiSettings.defaultUsername;
+    draftRetryDelayMinutes = uiSettings.retryDelayMinutes;
   }
 
   async function api(path, options = {}) {
@@ -298,7 +306,7 @@
       return false;
     }
 
-    return job.status === 'queued' || job.status === 'running';
+    return job.status === 'queued' || job.status === 'running' || job.status === 'retry_wait';
   }
 
   async function loadSelectedJobLogs(reset = false) {
@@ -390,7 +398,8 @@
     try {
       await queueDownload({
         url: job.url,
-        subdir: job.output_subdir || ''
+        subdir: job.output_subdir || '',
+        retry_delay_minutes: uiSettings.retryDelayMinutes
       });
     } catch (error) {
       setFlash(error.message, true);
@@ -429,7 +438,8 @@
 
     const requestBody = {
       url,
-      subdir: addSubdir.trim()
+      subdir: addSubdir.trim(),
+      retry_delay_minutes: uiSettings.retryDelayMinutes
     };
 
     if (addUsername.trim().length > 0 || addPassword.length > 0) {
@@ -571,6 +581,9 @@
               <p><strong>Output:</strong> {selectedJob.output_subdir}</p>
               <p><strong>Progress:</strong> {describeProgress(selectedJob)}</p>
               <p><strong>Files:</strong> {selectedJob.completed_files}/{selectedJob.total_files}</p>
+              <p><strong>Retry Delay:</strong> {selectedJob.retry_delay_minutes || 0} minute(s)</p>
+              <p><strong>Retry Count:</strong> {selectedJob.retry_count || 0}</p>
+              <p><strong>Next Retry:</strong> {formatTime(selectedJob.next_retry_at)}</p>
               <p><strong>Created:</strong> {formatTime(selectedJob.created_at)}</p>
               <p><strong>Started:</strong> {formatTime(selectedJob.started_at)}</p>
               <p><strong>Finished:</strong> {formatTime(selectedJob.finished_at)}</p>
@@ -710,6 +723,19 @@
           type="text"
           placeholder="Prefill only (no password stored)"
           bind:value={draftDefaultUsername}
+        />
+      </div>
+
+      <div class="s7-form-group">
+        <label for="retry-delay-minutes">Auto-retry failed downloads (minutes, 0 = off)</label>
+        <input
+          id="retry-delay-minutes"
+          class="s7-input"
+          type="number"
+          min="0"
+          max="1440"
+          step="1"
+          bind:value={draftRetryDelayMinutes}
         />
       </div>
 
