@@ -203,8 +203,19 @@ def build_queue_stats_locked() -> dict[str, object]:
             cancelled += 1
 
     terminal = completed + failed + cancelled
+
+    progress_points = 0.0
+    for job in jobs.values():
+        if job.status in {"completed", "failed", "cancelled"}:
+            progress_points += 100.0
+        elif job.status == "running":
+            running_percent = 0.0
+            if job.total_files > 0:
+                running_percent = (job.completed_files / job.total_files) * 100.0
+            progress_points += max(0.0, min(100.0, running_percent))
+
     if total > 0:
-        progress_percent = round((terminal / total) * 100, 1)
+        progress_percent = round(progress_points / total, 1)
     else:
         progress_percent = 0.0
 

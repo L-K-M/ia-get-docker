@@ -47,15 +47,6 @@ body {
   background: #fff;
 }
 
-.status-message {
-  margin: 0;
-  margin-left: 0.65rem;
-  margin-right: 0.65rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid #000;
-  background: #fff;
-}
-
 .toolbar {
   display: flex;
   gap: 0.45rem;
@@ -92,9 +83,23 @@ body {
 }
 
 .jobs-table :global(td.col-files),
-.jobs-table :global(td.col-progress),
 .jobs-table :global(td.col-status) {
   text-transform: lowercase;
+}
+
+.jobs-table :global(td.col-progress) {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.row-progress {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.row-progress span {
+  font-size: 0.72rem;
+  line-height: 1;
 }
 
 .footer-bar {

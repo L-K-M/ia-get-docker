@@ -146,7 +146,6 @@
 
     persistUiSettings();
     settingsOpen = false;
-    setFlash('UI settings saved.');
     startPolling();
   }
 
@@ -210,8 +209,9 @@
     isLoading = false;
   }
 
-  function selectJob(jobId) {
+  async function handleRowClick(jobId) {
     selectedJobId = jobId;
+    await openDetailsDialog(jobId);
   }
 
   function formatTime(isoDate) {
@@ -236,14 +236,31 @@
     return job.status;
   }
 
+  function getJobProgressNumber(job) {
+    if (!job) {
+      return 0;
+    }
+
+    if (job.status === 'completed') {
+      return 100;
+    }
+
+    if (job.total_files > 0) {
+      return Math.max(0, Math.min(100, Number(job.progress_percent || 0)));
+    }
+
+    return 0;
+  }
+
   function describeProgress(job) {
     if (job.status === 'queued') {
       return job.queue_position ? `waiting #${job.queue_position}` : 'waiting';
     }
 
     if (job.status === 'running') {
-      if (job.total_files > 0) {
-        return `${job.progress_percent}%`;
+      const percent = getJobProgressNumber(job);
+      if (percent > 0) {
+        return `${percent.toFixed(1)}%`;
       }
       return 'running';
     }
@@ -269,6 +286,19 @@
     }
 
     return job.status === 'queued' || job.status === 'running';
+  }
+
+  async function cancelJob(jobId) {
+    if (!jobId) {
+      return;
+    }
+
+    await api(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    await refreshJobsList();
+
+    if (showDetailsDialog && detailJobId === jobId) {
+      await refreshDetailDialog(false);
+    }
   }
 
   function openAddDownloadDialog() {
@@ -310,7 +340,6 @@
       showAddDialog = false;
       selectedJobId = payload.job.id;
       addPassword = '';
-      setFlash(`Queued download ${payload.job.id}.`);
       await refreshJobsList();
     } catch (error) {
       addError = error.message;
@@ -325,13 +354,7 @@
     }
 
     try {
-      await api(`/api/jobs/${selectedJobId}/cancel`, { method: 'POST' });
-      setFlash(`Cancellation requested for ${selectedJobId}.`);
-      await refreshJobsList();
-
-      if (showDetailsDialog && detailJobId === selectedJobId) {
-        await refreshDetailDialog(false);
-      }
+      await cancelJob(selectedJobId);
     } catch (error) {
       setFlash(error.message, true);
     }
@@ -448,8 +471,6 @@
     <main class="content">
       {#if flashMessage && flashError}
         <ErrorBanner message={flashMessage} onclose={() => setFlash('', false)} />
-      {:else if flashMessage}
-        <p class="status-message">{flashMessage}</p>
       {/if}
 
       <div class="toolbar">
@@ -475,13 +496,23 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <tr
               class:selected={selectedJobId === job.id}
-              onclick={() => selectJob(job.id)}
-              ondblclick={() => openDetailsDialog(job.id)}
+              onclick={() => handleRowClick(job.id)}
             >
               <td class="col-status">{describeStatus(job)}</td>
               <td class="col-identifier">{job.identifier}</td>
               <td class="col-destination">{job.output_subdir}</td>
-              <td class="col-progress">{describeProgress(job)}</td>
+              <td class="col-progress">
+                <div class="row-progress">
+                  <ProgressBar
+                    value={getJobProgressNumber(job)}
+                    max={100}
+                    height={10}
+                    title="Download progress"
+                    ariaLabel="Download progress"
+                  />
+                  <span>{describeProgress(job)}</span>
+                </div>
+              </td>
               <td class="col-files">{job.completed_files}/{job.total_files}</td>
               <td class="col-created">{formatTime(job.created_at)}</td>
             </tr>
@@ -595,6 +626,9 @@
       {/if}
 
       <div class="dialog-actions">
+        {#if detailJob}
+          <Button onclick={() => cancelJob(detailJob.id)} disabled={!canCancel(detailJob)}>Cancel</Button>
+        {/if}
         <Button onclick={() => refreshDetailDialog(true)} disabled={detailLoading}>Refresh</Button>
         <Button onclick={() => (showDetailsDialog = false)}>Close</Button>
       </div>
