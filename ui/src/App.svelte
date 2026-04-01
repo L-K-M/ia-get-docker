@@ -32,6 +32,7 @@
   let flashMessage = '';
   let flashError = false;
   let pollTimer = null;
+  let clearingFinished = false;
 
   let downloadRoot = '/downloads';
   let defaultAuthHint = 'Loading container defaults...';
@@ -76,6 +77,7 @@
   ];
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
+  $: hasFinishedJobs = jobs.some((item) => ['completed', 'failed', 'cancelled'].includes(item.status));
   $: footerSummary =
     queueStats.total_jobs === 0
       ? 'No downloads queued yet.'
@@ -254,6 +256,15 @@
       return `queued #${job.queue_position}`;
     }
 
+    if (job.status === 'retry_wait') {
+      const retryAt = job.next_retry_at ? new Date(job.next_retry_at) : null;
+      if (retryAt && !Number.isNaN(retryAt.getTime())) {
+        const remainingMinutes = Math.max(0, Math.ceil((retryAt.getTime() - Date.now()) / 60000));
+        return `retry in ${remainingMinutes}m`;
+      }
+      return 'retry wait';
+    }
+
     return job.status;
   }
 
@@ -276,6 +287,10 @@
   function describeProgress(job) {
     if (job.status === 'queued') {
       return job.queue_position ? `waiting #${job.queue_position}` : 'waiting';
+    }
+
+    if (job.status === 'retry_wait') {
+      return 'retry waiting';
     }
 
     if (job.status === 'running') {
@@ -377,7 +392,7 @@
     event.preventDefault();
     event.stopPropagation();
 
-    if (!job || job.status !== 'failed') {
+    if (!job || (job.status !== 'failed' && job.status !== 'cancelled')) {
       return;
     }
 
@@ -474,6 +489,27 @@
     }
   }
 
+  async function clearFinishedJobs() {
+    if (clearingFinished || !hasFinishedJobs) {
+      return;
+    }
+
+    clearingFinished = true;
+    try {
+      await api('/api/jobs/clear-finished', { method: 'POST' });
+      const selectionChanged = await refreshJobsList();
+      if (selectedJobId) {
+        await loadSelectedJobLogs(selectionChanged);
+      } else {
+        resetDetailLogs();
+      }
+    } catch (error) {
+      setFlash(error.message, true);
+    } finally {
+      clearingFinished = false;
+    }
+  }
+
   function startPolling() {
     stopPolling();
     pollTimer = setInterval(() => {
@@ -521,6 +557,9 @@
 
       <div class="toolbar">
         <Button onclick={openAddDownloadDialog}>Add Download...</Button>
+        <Button onclick={clearFinishedJobs} disabled={!hasFinishedJobs || clearingFinished}>
+          {clearingFinished ? 'Clearing...' : 'Clear Finished'}
+        </Button>
         <div class="toolbar-spacer"></div>
         <Button onclick={openSettings}>Settings</Button>
       </div>
@@ -554,8 +593,10 @@
                 </td>
                 <td class="col-files">{job.completed_files}/{job.total_files}</td>
                 <td class="col-actions">
-                  {#if job.status === 'failed'}
-                    <Button onclick={(event) => handleRowRetry(event, job)}>Try Again</Button>
+                  {#if job.status === 'failed' || job.status === 'cancelled'}
+                    <Button onclick={(event) => handleRowRetry(event, job)}>
+                      {job.status === 'cancelled' ? 'Restart' : 'Try Again'}
+                    </Button>
                   {:else}
                     <Button
                       onclick={(event) => handleRowCancel(event, job.id)}
@@ -631,7 +672,7 @@
           id="add-url"
           class="s7-input"
           type="url"
-          placeholder="https://archive.org/details/En-ROMs"
+          placeholder="https://archive.org/details/Something"
           bind:this={addUrlInput}
           bind:value={addUrl}
         />

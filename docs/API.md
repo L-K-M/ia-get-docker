@@ -1,6 +1,6 @@
 # HTTP API
 
-Base URL: `http://<host>:8080`
+Base URL: `http://<host>:14637`
 
 ## Health
 
@@ -39,7 +39,7 @@ Base URL: `http://<host>:8080`
 
 ```json
 {
-  "url": "https://archive.org/details/En-ROMs",
+  "url": "https://archive.org/details/Something",
   "subdir": "optional/custom/subfolder",
   "username": "optional archive.org username",
   "password": "optional archive.org password",
@@ -63,6 +63,10 @@ Base URL: `http://<host>:8080`
 
 - `POST /api/jobs/<job_id>/cancel`
   - Cancels a queued job immediately, or sends cancellation signal (`SIGINT`) to a running job.
+
+- `POST /api/jobs/clear-finished`
+  - Removes finished history rows (`completed`, `failed`, `cancelled`).
+  - Keeps active rows (`queued`, `running`, `retry_wait`).
 
 ## Job status values
 

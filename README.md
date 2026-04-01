@@ -38,6 +38,9 @@ https://archive.org/details/Something
 
 Downloads will be written to the mounted host directory defined by `DOWNLOADS_PATH` in `.env`.
 
+Queue state is persisted in the downloads volume, so active/queued transfers stay visible across container restarts.
+Use **Clear Finished** in the UI to remove completed/failed/cancelled history rows.
+
 ## Docker Compose configuration
 
 Key values in `.env`:
@@ -50,6 +53,8 @@ Key values in `.env`:
 - `TZ`: Container timezone. Default: `UTC`
 - `MAX_LOG_LINES`: Max retained log lines per job. Default: `5000`
 - `MAX_JOBS`: Max retained job history entries. Default: `25`
+- `STATE_FILE`: Persisted queue state file path. Default: `/downloads/.ia-get-web-state.json`
+- `STATE_LOG_LINES`: Number of log lines to persist per job. Default: `200`
 - `IA_USERNAME`: Optional default archive.org username/email for jobs. Default: empty
 - `IA_PASSWORD`: Optional default archive.org password for jobs. Default: empty
 

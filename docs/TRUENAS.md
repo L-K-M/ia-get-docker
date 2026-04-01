@@ -45,7 +45,7 @@ docker compose up -d --build
 Browse to:
 
 ```text
-http://<truenas-ip>:8080
+http://<truenas-ip>:14637
 ```
 
 ## 5) Verify output
@@ -59,7 +59,7 @@ Run one test download and confirm files appear in your mounted dataset.
 If you prefer TrueNAS custom app config instead of CLI compose, translate these settings:
 
 - Image: built image from this repo (`ia-get-web:latest`) or your own registry tag.
-- Port mapping: host `8080` -> container `8080`.
+- Port mapping: host `14637` -> container `8080`.
 - Volume mount: host dataset -> container `/downloads`.
 - Do not mount anything over `/app` (it contains the bundled web wrapper code).
 - Environment:
@@ -67,7 +67,7 @@ If you prefer TrueNAS custom app config instead of CLI compose, translate these 
   - `HOST=0.0.0.0`
   - `PORT=8080`
   - optional auth defaults: `IA_USERNAME`, `IA_PASSWORD`
-  - optional: `MAX_LOG_LINES`, `MAX_JOBS`, `TZ`
+  - optional: `MAX_LOG_LINES`, `MAX_JOBS`, `STATE_FILE`, `STATE_LOG_LINES`, `TZ`
 - Security context / user: run as your desired UID/GID.
 
 ## Updating upstream ia-get

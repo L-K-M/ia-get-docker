@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import re
 import signal
@@ -33,6 +34,10 @@ APP_DIR = Path(__file__).resolve().parent
 WEB_ROOT = Path(
     os.environ.get("WEB_ROOT", str(APP_DIR.parent / "web"))
 ).resolve()
+STATE_FILE = Path(
+    os.environ.get("STATE_FILE", str(DOWNLOAD_ROOT / ".ia-get-web-state.json"))
+).resolve()
+STATE_LOG_LINES = int(os.environ.get("STATE_LOG_LINES", "200"))
 
 
 def now_iso() -> str:
@@ -144,6 +149,200 @@ def serialize_job(job: Job, queue_position: Optional[int] = None) -> dict[str, o
         "progress_percent": percent,
         "log_count": len(job.logs),
     }
+
+
+def parse_iso_datetime(value: object) -> Optional[dt.datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+
+    try:
+        return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def job_to_state_dict(job: Job) -> dict[str, object]:
+    return {
+        "id": job.id,
+        "url": job.url,
+        "identifier": job.identifier,
+        "output_subdir": job.output_subdir,
+        "output_path": job.output_path,
+        "status": job.status,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "return_code": job.return_code,
+        "total_files": job.total_files,
+        "current_file": job.current_file,
+        "completed_files": job.completed_files,
+        "auth_username": job.auth_username,
+        "retry_delay_minutes": job.retry_delay_minutes,
+        "retry_count": job.retry_count,
+        "next_retry_at": job.next_retry_at,
+        "cancel_requested": job.cancel_requested,
+        "message": job.message,
+        "logs": job.logs[-STATE_LOG_LINES:] if STATE_LOG_LINES > 0 else [],
+    }
+
+
+def state_dict_to_job(data: object) -> Optional[Job]:
+    if not isinstance(data, dict):
+        return None
+
+    required_fields = ["id", "url", "identifier", "output_subdir", "output_path"]
+    if any(field not in data for field in required_fields):
+        return None
+
+    job = Job(
+        id=str(data.get("id", "")).strip(),
+        url=str(data.get("url", "")).strip(),
+        identifier=str(data.get("identifier", "")).strip(),
+        output_subdir=str(data.get("output_subdir", "")).strip(),
+        output_path=str(data.get("output_path", "")).strip(),
+    )
+
+    if not job.id or not job.url:
+        return None
+
+    job.status = str(data.get("status", "queued"))
+    job.created_at = str(data.get("created_at", job.created_at))
+    job.started_at = data.get("started_at") if isinstance(data.get("started_at"), str) else None
+    job.finished_at = data.get("finished_at") if isinstance(data.get("finished_at"), str) else None
+
+    return_code = data.get("return_code")
+    job.return_code = int(return_code) if isinstance(return_code, int) else None
+
+    for numeric_field in ["total_files", "current_file", "completed_files", "retry_delay_minutes", "retry_count"]:
+        raw_value = data.get(numeric_field)
+        if isinstance(raw_value, int):
+            setattr(job, numeric_field, raw_value)
+
+    if job.retry_delay_minutes < 0:
+        job.retry_delay_minutes = 0
+
+    if job.retry_count < 0:
+        job.retry_count = 0
+
+    job.auth_username = data.get("auth_username") if isinstance(data.get("auth_username"), str) else None
+    job.next_retry_at = data.get("next_retry_at") if isinstance(data.get("next_retry_at"), str) else None
+    job.cancel_requested = bool(data.get("cancel_requested", False))
+    job.message = str(data.get("message", ""))
+
+    logs = data.get("logs")
+    if isinstance(logs, list):
+        job.logs = [str(item) for item in logs][-MAX_LOG_LINES:]
+
+    # Never restore secrets or process handles from disk.
+    job.auth_password = None
+    job.process = None
+
+    return job
+
+
+def persist_state_locked() -> None:
+    try:
+        payload = {
+            "version": 1,
+            "saved_at": now_iso(),
+            "queued_job_ids": list(queued_job_ids),
+            "active_job_id": active_job_id,
+            "jobs": [job_to_state_dict(job) for job in jobs.values()],
+        }
+
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+        temp_file.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        temp_file.replace(STATE_FILE)
+    except Exception as exc:  # pragma: no cover - filesystem errors are environment-specific
+        app.logger.warning("Failed to persist state to %s: %s", STATE_FILE, exc)
+
+
+def restore_state_locked() -> None:
+    if not STATE_FILE.exists():
+        return
+
+    try:
+        payload = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - malformed state is environment-specific
+        app.logger.warning("Failed to read state file %s: %s", STATE_FILE, exc)
+        return
+
+    job_entries = payload.get("jobs")
+    if not isinstance(job_entries, list):
+        return
+
+    restored_jobs: dict[str, Job] = {}
+    for entry in job_entries:
+        restored = state_dict_to_job(entry)
+        if restored is not None:
+            restored_jobs[restored.id] = restored
+
+    jobs.clear()
+    jobs.update(restored_jobs)
+
+    restored_queue = payload.get("queued_job_ids")
+    ordered_queue: list[str] = []
+    if isinstance(restored_queue, list):
+        for item in restored_queue:
+            job_id = str(item)
+            job = jobs.get(job_id)
+            if job is not None and job.status == "queued" and job_id not in ordered_queue:
+                ordered_queue.append(job_id)
+
+    interrupted_running_ids: list[str] = []
+    for job in jobs.values():
+        job.process = None
+        job.auth_password = None
+
+        if job.status == "running":
+            job.status = "queued"
+            job.started_at = None
+            job.finished_at = None
+            job.return_code = None
+            job.next_retry_at = None
+            job.cancel_requested = False
+            job.message = "Interrupted by restart; queued to resume"
+            append_log_line_locked(job, "Previous run interrupted by restart; queued to resume")
+            if job.id not in interrupted_running_ids:
+                interrupted_running_ids.append(job.id)
+
+    for job_id in interrupted_running_ids:
+        if job_id not in ordered_queue:
+            ordered_queue.insert(0, job_id)
+
+    for job in jobs.values():
+        if job.status == "queued" and job.id not in ordered_queue:
+            ordered_queue.append(job.id)
+
+    queued_job_ids.clear()
+    queued_job_ids.extend(ordered_queue)
+
+    for job in jobs.values():
+        if job.status != "retry_wait":
+            continue
+
+        retry_at = parse_iso_datetime(job.next_retry_at)
+        if retry_at is None:
+            job.status = "queued"
+            job.next_retry_at = None
+            if job.id not in queued_job_ids:
+                queued_job_ids.append(job.id)
+            continue
+
+        remaining_seconds = int((retry_at - dt.datetime.now(dt.UTC)).total_seconds())
+        if remaining_seconds <= 0:
+            job.status = "queued"
+            job.next_retry_at = None
+            if job.id not in queued_job_ids:
+                queued_job_ids.append(job.id)
+        else:
+            schedule_retry_after_delay(job.id, remaining_seconds)
+
+    global active_job_id
+    active_job_id = None
+
+    persist_state_locked()
 
 
 def append_log_line_locked(job: Job, line: str) -> None:
@@ -359,6 +558,7 @@ def schedule_retry_after_delay(job_id: str, delay_seconds: int) -> None:
             queue_position = len(queued_job_ids)
             job.message = f"Queued for retry (position {queue_position})"
             append_log_line_locked(job, "Retry delay elapsed; job re-queued")
+            persist_state_locked()
             jobs_cv.notify_all()
 
     threading.Thread(
@@ -385,6 +585,7 @@ def run_job(job_id: str) -> None:
         job.return_code = None
         job.next_retry_at = None
         job.message = "Launching ia-get..."
+        persist_state_locked()
 
         if job.cancel_requested:
             job.status = "cancelled"
@@ -394,6 +595,7 @@ def run_job(job_id: str) -> None:
             if active_job_id == job_id:
                 active_job_id = None
             prune_history_locked()
+            persist_state_locked()
             jobs_cv.notify_all()
             return
 
@@ -418,6 +620,7 @@ def run_job(job_id: str) -> None:
                 if active_job_id == job_id:
                     active_job_id = None
                 prune_history_locked()
+                persist_state_locked()
                 jobs_cv.notify_all()
                 return
 
@@ -437,6 +640,7 @@ def run_job(job_id: str) -> None:
             if active_job_id == job_id:
                 active_job_id = None
             prune_history_locked()
+            persist_state_locked()
             jobs_cv.notify_all()
         return
 
@@ -473,6 +677,7 @@ def run_job(job_id: str) -> None:
             if active_job_id == job_id:
                 active_job_id = None
             prune_history_locked()
+            persist_state_locked()
             jobs_cv.notify_all()
         return
 
@@ -487,6 +692,7 @@ def run_job(job_id: str) -> None:
         if running_job.auth_username:
             append_log_line_locked(running_job, f"Authenticated as: {running_job.auth_username}")
         running_job.message = "ia-get is running"
+        persist_state_locked()
 
     if process.stdin is not None:
         if job.auth_username:
@@ -512,6 +718,7 @@ def run_job(job_id: str) -> None:
                     if active_job_id == job_id:
                         active_job_id = None
                     prune_history_locked()
+                    persist_state_locked()
                     jobs_cv.notify_all()
                 return
         process.stdin.close()
@@ -583,6 +790,7 @@ def run_job(job_id: str) -> None:
         if active_job_id == job_id:
             active_job_id = None
         prune_history_locked()
+        persist_state_locked()
         jobs_cv.notify_all()
 
     if retry_delay_seconds > 0:
@@ -720,6 +928,7 @@ def create_job() -> tuple[dict[str, object], int]:
         queued_job_ids.append(job_id)
         queue_position = len(queued_job_ids)
         job.message = f"Queued (position {queue_position})"
+        persist_state_locked()
         jobs_cv.notify_all()
 
         response_payload = {
@@ -747,6 +956,7 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
                 job.message = "Download cancelled"
                 append_log_line_locked(job, "Cancelled before starting")
                 prune_history_locked()
+                persist_state_locked()
             elif job.status == "retry_wait":
                 job.status = "cancelled"
                 job.finished_at = now_iso()
@@ -754,9 +964,11 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
                 job.message = "Download cancelled"
                 append_log_line_locked(job, "Cancelled while waiting for retry")
                 prune_history_locked()
+                persist_state_locked()
             else:
                 job.message = "Cancellation requested"
                 append_log_line_locked(job, "Cancellation requested before start")
+                persist_state_locked()
 
             jobs_cv.notify_all()
             queue_position = build_queue_positions_locked().get(job.id)
@@ -773,6 +985,7 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
         process = job.process
         append_log_line_locked(job, "Cancellation requested")
         queue_position = build_queue_positions_locked().get(job.id)
+        persist_state_locked()
         jobs_cv.notify_all()
 
     if process is not None and process.poll() is None:
@@ -791,8 +1004,35 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
     }, 200
 
 
+@app.post("/api/jobs/clear-finished")
+def clear_finished_jobs() -> tuple[dict[str, object], int]:
+    with jobs_cv:
+        removable_ids = [
+            job_id
+            for job_id, job in jobs.items()
+            if job.status in {"completed", "failed", "cancelled"}
+        ]
+
+        for job_id in removable_ids:
+            jobs.pop(job_id, None)
+            if job_id in queued_job_ids:
+                queued_job_ids.remove(job_id)
+
+        if removable_ids:
+            persist_state_locked()
+
+        payload = {
+            "removed": len(removable_ids),
+            "queue_stats": build_queue_stats_locked(),
+        }
+
+    return payload, 200
+
+
 def main() -> None:
     DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    with jobs_cv:
+        restore_state_locked()
     ensure_scheduler_started()
     app.run(host=HOST, port=PORT)
 

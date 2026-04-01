@@ -13,6 +13,8 @@ services:
       PORT: 8080
       MAX_LOG_LINES: ${MAX_LOG_LINES:-5000}
       MAX_JOBS: ${MAX_JOBS:-25}
+      STATE_FILE: ${STATE_FILE:-/downloads/.ia-get-web-state.json}
+      STATE_LOG_LINES: ${STATE_LOG_LINES:-200}
       IA_USERNAME: ${IA_USERNAME:-}
       IA_PASSWORD: ${IA_PASSWORD:-}
       TZ: ${TZ:-UTC}
