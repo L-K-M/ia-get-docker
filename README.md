@@ -35,7 +35,7 @@ http://<your-host-ip>:8080
 4. Paste an archive URL like:
 
 ```text
-https://archive.org/details/En-ROMs
+https://archive.org/details/Something
 ```
 
 Downloads will be written to the mounted host directory defined by `DOWNLOADS_PATH` in `.env`.
@@ -60,7 +60,7 @@ Key values in `.env`:
 If you want CLI behavior only, override the container command:
 
 ```bash
-docker compose run --rm ia-get-web /usr/local/bin/ia-get https://archive.org/details/En-ROMs
+docker compose run --rm ia-get-web /usr/local/bin/ia-get https://archive.org/details/<identifier>
 ```
 
 Authenticated CLI example:
