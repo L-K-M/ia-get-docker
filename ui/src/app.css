@@ -95,14 +95,19 @@ body {
 
 .table-pane {
   min-height: 0;
-  border: 1px solid #000;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  border-left: none;
   border-right: none;
   overflow: hidden;
 }
 
 .details-pane {
   min-height: 0;
-  border: 1px solid #000;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  border-left: 1px solid #000;
+  border-right: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -143,11 +148,17 @@ body {
 
 .jobs-table td.col-actions {
   text-align: right;
+  padding-right: 14px;
 }
 
 .jobs-table td.col-actions button {
-  min-width: 172px;
+  width: 132px;
+  max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
+  box-sizing: border-box;
+  padding-left: 12px;
+  padding-right: 12px;
 }
 
 .row-progressbar {
@@ -237,8 +248,8 @@ body {
     gap: 0.55rem;
   }
 
-  .table-pane {
-    border-right: 1px solid #000;
+  .details-pane {
+    border-left: none;
   }
 
   .toolbar button {

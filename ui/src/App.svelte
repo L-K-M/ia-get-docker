@@ -69,10 +69,10 @@
   let draftRetryDelayMinutes = 10;
 
   const columns = [
-    { key: 'name', label: 'Name', width: '30%', className: 'col-name' },
-    { key: 'progress', label: 'Progress', width: '39%', className: 'col-progress' },
+    { key: 'name', label: 'Name', width: '31%', className: 'col-name' },
+    { key: 'progress', label: 'Progress', width: '41%', className: 'col-progress' },
     { key: 'files', label: 'Files', width: '12%', className: 'col-files' },
-    { key: 'actions', label: 'Actions', width: '19%', className: 'col-actions' }
+    { key: 'actions', label: 'Actions', width: '16%', className: 'col-actions' }
   ];
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;

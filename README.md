@@ -1,5 +1,7 @@
 # ia-get Docker Wrapper
 
+![Screenshot](screenshot.png)
+
 Containerized wrapper around [`L-K-M/ia-get`](https://github.com/L-K-M/ia-get) (a fork of `wimpysworld/ia-get` with authentication support), built for NAS-style deployments (including TrueNAS), with an optional web UI.
 
 ## Quick start
