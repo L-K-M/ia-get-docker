@@ -1,0 +1,24 @@
+services:
+  ia-get-web:
+    build:
+      context: .
+      args:
+        IA_GET_REPO: ${IA_GET_REPO:-https://github.com/L-K-M/ia-get.git}
+        IA_GET_REF: ${IA_GET_REF:-main}
+    image: ia-get-web:${IMAGE_TAG:-latest}
+    container_name: ia-get-web
+    environment:
+      DOWNLOAD_DIR: /downloads
+      HOST: 0.0.0.0
+      PORT: 8080
+      MAX_LOG_LINES: ${MAX_LOG_LINES:-5000}
+      MAX_JOBS: ${MAX_JOBS:-25}
+      IA_USERNAME: ${IA_USERNAME:-}
+      IA_PASSWORD: ${IA_PASSWORD:-}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - "${DOWNLOADS_PATH:-./downloads}:/downloads"
+    user: "${PUID:-568}:${PGID:-568}"
+    restart: unless-stopped

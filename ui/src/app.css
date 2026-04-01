@@ -1,0 +1,147 @@
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: #d7d7d7;
+  background-image: url('./assets/background.svg');
+  background-repeat: repeat;
+  background-size: 300px 300px;
+}
+
+.desktop {
+  height: 100dvh;
+  padding: 1rem;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+}
+
+.app-window {
+  width: min(1060px, 100%);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3), 0 10px 200px rgba(0, 0, 0, 0.6);
+  background: #fff !important;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.content {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: #fff;
+  overflow: auto;
+}
+
+.status-message {
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--system7-color-ink, #000);
+  background: #fff;
+}
+
+.panel {
+  border: 1px solid var(--system7-color-ink, #000);
+  background: #fff;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.form-panel label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.small-text {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.stats-grid {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.stats-grid p {
+  margin: 0;
+}
+
+.log-output {
+  margin: 0;
+  min-height: 200px;
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid var(--system7-color-ink, #000);
+  padding: 0.55rem;
+  background: #f7f7f7;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.jobs-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.jobs-list li {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.settings-form {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.4rem;
+}
+
+.settings-form .s7-form-group {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.settings-form label {
+  font-size: 0.83rem;
+}
+
+.settings-actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .desktop {
+    padding: 0.5rem;
+  }
+
+  .actions :global(button) {
+    width: 100%;
+  }
+}
