@@ -6,3 +6,4 @@ __pycache__/
 .idea/
 ui/node_modules/
 ui/dist/
+/.codenomad/
