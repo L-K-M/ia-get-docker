@@ -14,6 +14,7 @@
   const API_KEY_STORAGE_KEY = 'ia-get-api-key';
   const DEFAULT_POLL_INTERVAL_MS = 1200;
   const DEFAULT_RECENT_JOBS_LIMIT = 12;
+  const DEFAULT_DETAIL_LOG_LIMIT = 5000;
 
   let jobs = [];
   let activeJobId = null;
@@ -71,6 +72,7 @@
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
     autoScrollLogs: true,
     recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
+    detailLogLimit: DEFAULT_DETAIL_LOG_LIMIT,
     defaultSubdir: '',
     defaultUsername: '',
     retryDelayMinutes: 10,
@@ -80,6 +82,7 @@
   let settingsOpen = false;
   let draftPollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   let draftRecentJobsLimit = DEFAULT_RECENT_JOBS_LIMIT;
+  let draftDetailLogLimit = DEFAULT_DETAIL_LOG_LIMIT;
   let draftDefaultSubdir = '';
   let draftDefaultUsername = '';
   let draftRetryDelayMinutes = 10;
@@ -128,6 +131,19 @@
     detailLogOffset = 0;
   }
 
+  function capDetailLogs(lines) {
+    const maxLines = clampInteger(
+      uiSettings.detailLogLimit,
+      100,
+      50000,
+      DEFAULT_DETAIL_LOG_LIMIT
+    );
+    if (!Array.isArray(lines) || lines.length <= maxLines) {
+      return lines;
+    }
+    return lines.slice(lines.length - maxLines);
+  }
+
   function focusAddUrlInput() {
     tick().then(() => {
       setTimeout(() => addUrlInput?.focus(), 0);
@@ -146,6 +162,7 @@
         pollIntervalMs: clampInteger(parsed.pollIntervalMs, 500, 10000, DEFAULT_POLL_INTERVAL_MS),
         autoScrollLogs: Boolean(parsed.autoScrollLogs ?? true),
         recentJobsLimit: clampInteger(parsed.recentJobsLimit, 3, 50, DEFAULT_RECENT_JOBS_LIMIT),
+        detailLogLimit: clampInteger(parsed.detailLogLimit, 100, 50000, DEFAULT_DETAIL_LOG_LIMIT),
         defaultSubdir: String(parsed.defaultSubdir || '').trim(),
         defaultUsername: String(parsed.defaultUsername || '').trim(),
         retryDelayMinutes: clampInteger(parsed.retryDelayMinutes, 0, 1440, 10),
@@ -156,6 +173,7 @@
         pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
         autoScrollLogs: true,
         recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
+        detailLogLimit: DEFAULT_DETAIL_LOG_LIMIT,
         defaultSubdir: '',
         defaultUsername: '',
         retryDelayMinutes: 10,
@@ -171,6 +189,7 @@
   function openSettings() {
     draftPollIntervalMs = uiSettings.pollIntervalMs;
     draftRecentJobsLimit = uiSettings.recentJobsLimit;
+    draftDetailLogLimit = uiSettings.detailLogLimit;
     draftDefaultSubdir = uiSettings.defaultSubdir;
     draftDefaultUsername = uiSettings.defaultUsername;
     draftRetryDelayMinutes = uiSettings.retryDelayMinutes;
@@ -183,11 +202,14 @@
       pollIntervalMs: clampInteger(draftPollIntervalMs, 500, 10000, DEFAULT_POLL_INTERVAL_MS),
       autoScrollLogs: uiSettings.autoScrollLogs,
       recentJobsLimit: clampInteger(draftRecentJobsLimit, 3, 50, DEFAULT_RECENT_JOBS_LIMIT),
+      detailLogLimit: clampInteger(draftDetailLogLimit, 100, 50000, DEFAULT_DETAIL_LOG_LIMIT),
       defaultSubdir: String(draftDefaultSubdir || '').trim(),
       defaultUsername: String(draftDefaultUsername || '').trim(),
       retryDelayMinutes: clampInteger(draftRetryDelayMinutes, 0, 1440, 10),
       retryMaxAttempts: clampInteger(draftRetryMaxAttempts, 0, 100, 3)
     };
+
+    detailLogs = capDetailLogs(detailLogs);
 
     persistUiSettings();
     settingsOpen = false;
@@ -445,12 +467,12 @@
     const newLines = logsPayload.lines || [];
 
     if (reset) {
-      detailLogs = newLines.length > 0 ? [...newLines] : ['No logs yet.'];
+      detailLogs = capDetailLogs(newLines.length > 0 ? [...newLines] : ['No logs yet.']);
     } else if (newLines.length > 0) {
       if (detailLogs.length === 1 && detailLogs[0] === 'No logs yet.') {
         detailLogs = [];
       }
-      detailLogs = [...detailLogs, ...newLines];
+      detailLogs = capDetailLogs([...detailLogs, ...newLines]);
     } else if (detailLogs.length === 0) {
       detailLogs = ['No logs yet.'];
     }
@@ -972,6 +994,25 @@
           max="50"
           step="1"
           bind:value={draftRecentJobsLimit}
+        />
+      </div>
+
+      <div class="s7-form-group">
+        <label for="detail-log-limit" class="settings-label">
+          Detail log line cap
+          <span
+            class="balloon-help"
+            title="Maximum log lines kept in the details pane per selected job. Older lines are trimmed from the top."
+            >?</span>
+        </label>
+        <input
+          id="detail-log-limit"
+          class="s7-input"
+          type="number"
+          min="100"
+          max="50000"
+          step="100"
+          bind:value={draftDetailLogLimit}
         />
       </div>
 

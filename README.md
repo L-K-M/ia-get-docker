@@ -42,6 +42,7 @@ Downloads will be written to the mounted host directory defined by `DOWNLOADS_PA
 
 Queue state is persisted in the downloads volume, so active/queued transfers stay visible across container restarts.
 Use **Clear Inactive** in the UI to remove completed/failed/cancelled history rows.
+Use **Settings** to tune polling cadence, table row count, detail log line cap, and retry/form defaults.
 
 ## Docker Compose configuration
 
