@@ -993,6 +993,95 @@ def create_job() -> tuple[dict[str, object], int]:
     return response_payload, 201
 
 
+@app.post("/api/jobs/<job_id>/restart")
+def restart_job(job_id: str) -> tuple[dict[str, object], int]:
+    ensure_scheduler_started()
+
+    payload = request.get_json(silent=True) or {}
+
+    with jobs_cv:
+        job = jobs.get(job_id)
+        if job is None:
+            return {"error": "Job not found"}, 404
+
+        if job.status not in {"failed", "cancelled"}:
+            return {"error": f"Job is {job.status} and cannot be restarted"}, 409
+
+        # --- resolve auth for the restarted job ---
+        password_input = payload.get("password")
+        username_input = payload.get("username")
+
+        if password_input is not None:
+            # Explicit credentials supplied in this request.
+            auth_username = str(username_input).strip() if username_input else job.auth_username
+            auth_password = str(password_input)
+        elif job.auth_username:
+            # Job originally used auth – try container defaults.
+            if DEFAULT_IA_USERNAME == job.auth_username and DEFAULT_IA_PASSWORD:
+                auth_username = job.auth_username
+                auth_password = DEFAULT_IA_PASSWORD
+            else:
+                return {
+                    "error": (
+                        "Missing password for authenticated restart. "
+                        "Supply password or re-queue manually."
+                    )
+                }, 400
+        else:
+            auth_username = None
+            auth_password = None
+
+        # --- resolve optional retry settings (fall back to current values) ---
+        raw_delay = payload.get("retry_delay_minutes")
+        if raw_delay is not None:
+            try:
+                retry_delay_minutes = resolve_retry_delay_minutes(payload)
+            except ValueError as exc:
+                return {"error": str(exc)}, 400
+        else:
+            retry_delay_minutes = job.retry_delay_minutes
+
+        raw_attempts = payload.get("max_retry_attempts")
+        if raw_attempts is not None:
+            try:
+                max_retry_attempts = resolve_max_retry_attempts(payload)
+            except ValueError as exc:
+                return {"error": str(exc)}, 400
+        else:
+            max_retry_attempts = job.max_retry_attempts
+
+        # --- reset job state and re-queue ---
+        job.status = "queued"
+        job.started_at = None
+        job.finished_at = None
+        job.return_code = None
+        job.total_files = 0
+        job.current_file = 0
+        job.completed_files = 0
+        job.retry_count = 0
+        job.next_retry_at = None
+        job.cancel_requested = False
+        job.auth_username = auth_username
+        job.auth_password = auth_password
+        job.retry_delay_minutes = retry_delay_minutes
+        job.max_retry_attempts = max_retry_attempts
+        job.logs = []
+
+        queued_job_ids.append(job.id)
+        queue_position = len(queued_job_ids)
+        job.message = f"Queued (position {queue_position})"
+
+        persist_state_locked()
+        jobs_cv.notify_all()
+
+        response_payload = {
+            "job": serialize_job(job, queue_position),
+            "queue_stats": build_queue_stats_locked(),
+        }
+
+    return response_payload, 200
+
+
 @app.post("/api/jobs/<job_id>/cancel")
 def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
     with jobs_cv:

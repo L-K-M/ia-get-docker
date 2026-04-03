@@ -46,6 +46,7 @@
   let addUsername = '';
   let addPassword = '';
   let forceAuthInput = false;
+  let restartingJobId = null;
   let addError = '';
   let addSubmitting = false;
 
@@ -394,6 +395,22 @@
     await loadSelectedJobLogs(true);
   }
 
+  async function restartJob(jobId, extraBody = {}) {
+    const payload = await api(`/api/jobs/${jobId}/restart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        retry_delay_minutes: uiSettings.retryDelayMinutes,
+        max_retry_attempts: uiSettings.retryMaxAttempts,
+        ...extraBody
+      })
+    });
+
+    selectedJobId = payload.job.id;
+    await refreshJobsList();
+    await loadSelectedJobLogs(true);
+  }
+
   async function handleRowRetry(event, job) {
     event.preventDefault();
     event.stopPropagation();
@@ -406,6 +423,7 @@
       job.auth_enabled &&
       (!hasContainerDefaultPassword || containerDefaultUsername !== (job.auth_username || ''))
     ) {
+      restartingJobId = job.id;
       forceAuthInput = true;
       addUrl = job.url;
       addSubdir = job.output_subdir || '';
@@ -418,12 +436,7 @@
     }
 
     try {
-      await queueDownload({
-        url: job.url,
-        subdir: job.output_subdir || '',
-        retry_delay_minutes: uiSettings.retryDelayMinutes,
-        max_retry_attempts: uiSettings.retryMaxAttempts
-      });
+      await restartJob(job.id);
     } catch (error) {
       setFlash(error.message, true);
     }
@@ -442,10 +455,12 @@
   function closeAddDownloadDialog() {
     showAddDialog = false;
     forceAuthInput = false;
+    restartingJobId = null;
   }
 
   function openAddDownloadDialog() {
     forceAuthInput = false;
+    restartingJobId = null;
     addUrl = '';
     addSubdir = uiSettings.defaultSubdir || '';
     addUsername = hasContainerAuthDefaults ? '' : uiSettings.defaultUsername || containerDefaultUsername || '';
@@ -465,20 +480,29 @@
     addSubmitting = true;
     addError = '';
 
-    const requestBody = {
-      url,
-      subdir: addSubdir.trim(),
-      retry_delay_minutes: uiSettings.retryDelayMinutes,
-      max_retry_attempts: uiSettings.retryMaxAttempts
-    };
-
-    if ((!hasContainerAuthDefaults || forceAuthInput) && (addUsername.trim().length > 0 || addPassword.length > 0)) {
-      requestBody.username = addUsername.trim();
-      requestBody.password = addPassword;
-    }
-
     try {
-      await queueDownload(requestBody);
+      if (restartingJobId) {
+        const extraBody = {};
+        if (addUsername.trim().length > 0 || addPassword.length > 0) {
+          extraBody.username = addUsername.trim();
+          extraBody.password = addPassword;
+        }
+        await restartJob(restartingJobId, extraBody);
+      } else {
+        const requestBody = {
+          url,
+          subdir: addSubdir.trim(),
+          retry_delay_minutes: uiSettings.retryDelayMinutes,
+          max_retry_attempts: uiSettings.retryMaxAttempts
+        };
+
+        if ((!hasContainerAuthDefaults || forceAuthInput) && (addUsername.trim().length > 0 || addPassword.length > 0)) {
+          requestBody.username = addUsername.trim();
+          requestBody.password = addPassword;
+        }
+
+        await queueDownload(requestBody);
+      }
       closeAddDownloadDialog();
       addPassword = '';
     } catch (error) {
@@ -573,7 +597,7 @@
       <div class="toolbar">
         <Button onclick={openAddDownloadDialog}>Add Download...</Button>
         <Button onclick={clearFinishedJobs} disabled={!hasFinishedJobs || clearingFinished}>
-          {clearingFinished ? 'Clearing...' : 'Clear Finished'}
+          {clearingFinished ? 'Clearing...' : 'Clear Inactive'}
         </Button>
         <div class="toolbar-spacer"></div>
         <Button onclick={openSettings}>Settings</Button>

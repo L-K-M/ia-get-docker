@@ -66,8 +66,24 @@ Base URL: `http://<host>:14637`
 - `POST /api/jobs/<job_id>/cancel`
   - Cancels a queued job immediately, or sends cancellation signal (`SIGINT`) to a running job.
 
+- `POST /api/jobs/<job_id>/restart`
+  - Resets a `failed` or `cancelled` job and re-queues it (reuses the same job ID).
+  - Optional body:
+
+```json
+{
+  "username": "override archive.org username",
+  "password": "override archive.org password",
+  "retry_delay_minutes": 10,
+  "max_retry_attempts": 3
+}
+```
+
+  - If the job originally used authentication and no password is supplied, container defaults (`IA_USERNAME`/`IA_PASSWORD`) are tried. Returns `400` if they don't match.
+  - `retry_delay_minutes` and `max_retry_attempts` default to the job's existing values when omitted.
+
 - `POST /api/jobs/clear-finished`
-  - Removes finished history rows (`completed`, `failed`, `cancelled`).
+  - Removes inactive history rows (`completed`, `failed`, `cancelled`).
   - Keeps active rows (`queued`, `running`, `retry_wait`).
 
 ## Job status values
