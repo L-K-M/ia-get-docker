@@ -67,7 +67,7 @@ If you prefer TrueNAS custom app config instead of CLI compose, translate these 
   - `HOST=0.0.0.0`
   - `PORT=8080`
   - optional auth defaults: `IA_USERNAME`, `IA_PASSWORD`
-  - optional: `MAX_LOG_LINES`, `MAX_JOBS`, `STATE_FILE`, `STATE_LOG_LINES`, `TZ`
+  - optional: `MAX_LOG_LINES`, `MAX_JOBS`, `STATE_FILE`, `STATE_LOG_LINES`, `TZ`, `API_KEY`
 - Security context / user: run as your desired UID/GID.
 
 ## Updating upstream ia-get

@@ -59,6 +59,7 @@ Key values in `.env`:
 - `STATE_LOG_LINES`: Number of log lines to persist per job. Default: `200`
 - `IA_USERNAME`: Optional default archive.org username/email for jobs. Default: empty
 - `IA_PASSWORD`: Optional default archive.org password for jobs. Default: empty
+- `API_KEY`: Optional static API key. When set, all `/api/*` requests require `X-API-Key` header. Default: empty (unauthenticated)
 
 ## Using `ia-get` directly (without UI)
 
