@@ -1143,6 +1143,31 @@ def create_job() -> tuple[dict[str, object], int]:
         return {"error": str(exc)}, 400
 
     with jobs_cv:
+        for existing in jobs.values():
+            if existing.identifier != identifier:
+                continue
+
+            if existing.status not in {"queued", "running", "retry_wait"}:
+                continue
+
+            duplicate_status = existing.status
+            if existing.status == "queued":
+                queue_position = build_queue_positions_locked().get(existing.id)
+                duplicate_status = (
+                    f"queued (position {queue_position})"
+                    if queue_position is not None
+                    else "queued"
+                )
+            elif existing.status == "retry_wait":
+                duplicate_status = "waiting to retry"
+
+            return {
+                "error": (
+                    f"A download for '{identifier}' is already {duplicate_status}. "
+                    "Wait for it to finish or cancel it before queueing again."
+                )
+            }, 409
+
         job_id = uuid.uuid4().hex[:12]
         job = Job(
             id=job_id,

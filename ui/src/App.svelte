@@ -37,6 +37,8 @@
   let pollTimer = null;
   let pollInFlight = false;
   let clearingFinished = false;
+  let cancellingJobIds = new Set();
+  let retryingJobIds = new Set();
 
   let authRequired = false;
   let apiKey = '';
@@ -419,6 +421,16 @@
     return job.status === 'queued' || job.status === 'running' || job.status === 'retry_wait';
   }
 
+  function markJobActionPending(setRef, jobId, isPending) {
+    const next = new Set(setRef);
+    if (isPending) {
+      next.add(jobId);
+    } else {
+      next.delete(jobId);
+    }
+    return next;
+  }
+
   async function loadSelectedJobLogs(reset = false) {
     if (!selectedJobId) {
       return;
@@ -464,10 +476,18 @@
     event.preventDefault();
     event.stopPropagation();
 
+    if (cancellingJobIds.has(jobId)) {
+      return;
+    }
+
+    cancellingJobIds = markJobActionPending(cancellingJobIds, jobId, true);
+
     try {
       await cancelJob(jobId);
     } catch (error) {
       setFlash(error.message, true);
+    } finally {
+      cancellingJobIds = markJobActionPending(cancellingJobIds, jobId, false);
     }
   }
 
@@ -507,6 +527,10 @@
       return;
     }
 
+    if (retryingJobIds.has(job.id)) {
+      return;
+    }
+
     if (
       job.auth_enabled &&
       (!hasContainerDefaultPassword || containerDefaultUsername !== (job.auth_username || ''))
@@ -523,10 +547,14 @@
       return;
     }
 
+    retryingJobIds = markJobActionPending(retryingJobIds, job.id, true);
+
     try {
       await restartJob(job.id);
     } catch (error) {
       setFlash(error.message, true);
+    } finally {
+      retryingJobIds = markJobActionPending(retryingJobIds, job.id, false);
     }
   }
 
@@ -760,15 +788,22 @@
                 <td class="col-files">{job.completed_files}/{job.total_files}</td>
                 <td class="col-actions">
                   {#if job.status === 'failed' || job.status === 'cancelled'}
-                    <Button onclick={(event) => handleRowRetry(event, job)}>
-                      {job.status === 'cancelled' ? 'Restart' : 'Try Again'}
+                    <Button
+                      onclick={(event) => handleRowRetry(event, job)}
+                      disabled={retryingJobIds.has(job.id)}
+                    >
+                      {#if retryingJobIds.has(job.id)}
+                        {job.status === 'cancelled' ? 'Restarting...' : 'Retrying...'}
+                      {:else}
+                        {job.status === 'cancelled' ? 'Restart' : 'Try Again'}
+                      {/if}
                     </Button>
                   {:else}
                     <Button
                       onclick={(event) => handleRowCancel(event, job.id)}
-                      disabled={!canCancel(job)}
+                      disabled={!canCancel(job) || cancellingJobIds.has(job.id)}
                     >
-                      Cancel
+                      {cancellingJobIds.has(job.id) ? 'Cancelling...' : 'Cancel'}
                     </Button>
                   {/if}
                 </td>
