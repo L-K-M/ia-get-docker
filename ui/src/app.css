@@ -203,8 +203,11 @@ body {
   border: 1px solid #000;
   background: #f7f7f7;
   padding: 0.5rem;
-  overflow: auto;
-  white-space: pre-wrap;
+  overflow-x: auto;
+  overflow-y: auto;
+  white-space: pre;
+  font-family: 'Courier New', Courier, monospace !important;
+  font-size: 0.82rem !important;
   line-height: 1.25;
 }
 
