@@ -39,6 +39,7 @@ STATE_FILE = Path(
 ).resolve()
 STATE_LOG_LINES = int(os.environ.get("STATE_LOG_LINES", "200"))
 API_KEY = os.environ.get("API_KEY", "").strip()
+MAX_REQUEST_BODY_BYTES = int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(16 * 1024)))
 
 
 def now_iso() -> str:
@@ -73,6 +74,7 @@ class Job:
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BODY_BYTES
 
 AUTH_EXEMPT_EXACT = ("/", "/index.html", "/healthz", "/api/auth-status")
 AUTH_EXEMPT_PREFIXES = ("/assets/",)
@@ -95,6 +97,13 @@ def check_api_key() -> tuple[dict[str, str], int] | None:
 @app.get("/api/auth-status")
 def auth_status() -> tuple[dict[str, object], int]:
     return {"auth_required": bool(API_KEY)}, 200
+
+
+@app.errorhandler(413)
+def request_body_too_large(_error: object) -> tuple[dict[str, str], int]:
+    return {
+        "error": f"Request body too large (max {MAX_REQUEST_BODY_BYTES} bytes)."
+    }, 413
 
 
 jobs: dict[str, Job] = {}
@@ -383,7 +392,7 @@ def restore_state_locked() -> None:
 
 
 def append_log_line_locked(job: Job, line: str) -> None:
-    timestamp = dt.datetime.now().strftime("%H:%M:%S")
+    timestamp = dt.datetime.now(dt.UTC).strftime("%H:%M:%SZ")
     job.logs.append(f"[{timestamp}] {line}")
     if len(job.logs) > MAX_LOG_LINES:
         job.logs = job.logs[-MAX_LOG_LINES:]
@@ -438,7 +447,6 @@ def build_queue_stats_locked() -> dict[str, object]:
         if job.status == "queued":
             queued += 1
         elif job.status == "retry_wait":
-            queued += 1
             retry_wait += 1
         elif job.status == "running":
             running += 1
@@ -450,6 +458,7 @@ def build_queue_stats_locked() -> dict[str, object]:
             cancelled += 1
 
     terminal = completed + failed + cancelled
+    pending = queued + retry_wait
 
     progress_points = 0.0
     for job in jobs.values():
@@ -470,6 +479,7 @@ def build_queue_stats_locked() -> dict[str, object]:
         "total_jobs": total,
         "queued_jobs": queued,
         "retry_wait_jobs": retry_wait,
+        "pending_jobs": pending,
         "running_jobs": running,
         "completed_jobs": completed,
         "failed_jobs": failed,
@@ -895,9 +905,12 @@ def healthz() -> tuple[dict[str, str], int]:
 
 @app.get("/api/config")
 def get_config() -> tuple[dict[str, object], int]:
+    with jobs_cv:
+        active = active_job_id
+
     return {
         "download_dir": str(DOWNLOAD_ROOT),
-        "active_job_id": active_job_id,
+        "active_job_id": active,
         "default_username": DEFAULT_IA_USERNAME,
         "has_default_password": bool(DEFAULT_IA_PASSWORD),
     }, 200
@@ -1108,6 +1121,8 @@ def restart_job(job_id: str) -> tuple[dict[str, object], int]:
 
 @app.post("/api/jobs/<job_id>/cancel")
 def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
+    response_snapshot: Optional[dict[str, object]] = None
+
     with jobs_cv:
         job = jobs.get(job_id)
         if job is None:
@@ -1152,6 +1167,7 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
         process = job.process
         append_log_line_locked(job, "Cancellation requested")
         queue_position = build_queue_positions_locked().get(job.id)
+        response_snapshot = serialize_job(job, queue_position)
         persist_state_locked()
         jobs_cv.notify_all()
 
@@ -1162,11 +1178,17 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
             process.terminate()
 
     with jobs_cv:
+        current_job = jobs.get(job_id)
+        current_queue_position = None
+        if current_job is not None:
+            current_queue_position = build_queue_positions_locked().get(current_job.id)
+            response_snapshot = serialize_job(current_job, current_queue_position)
+
         queue_stats = build_queue_stats_locked()
 
     return {
         "ok": True,
-        "job": serialize_job(job, queue_position),
+        "job": response_snapshot,
         "queue_stats": queue_stats,
     }, 200
 

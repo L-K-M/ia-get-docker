@@ -21,6 +21,8 @@
   let queueStats = {
     total_jobs: 0,
     queued_jobs: 0,
+    retry_wait_jobs: 0,
+    pending_jobs: 0,
     running_jobs: 0,
     completed_jobs: 0,
     failed_jobs: 0,
@@ -33,6 +35,7 @@
   let flashMessage = '';
   let flashError = false;
   let pollTimer = null;
+  let pollInFlight = false;
   let clearingFinished = false;
 
   let authRequired = false;
@@ -89,10 +92,21 @@
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
   $: hasFinishedJobs = jobs.some((item) => ['completed', 'failed', 'cancelled'].includes(item.status));
+  $: visibleJobs = jobs.slice(0, uiSettings.recentJobsLimit);
+  $: hiddenJobCount = Math.max(0, jobs.length - visibleJobs.length);
+  $: queuedJobsCount = Number(queueStats.queued_jobs || 0);
+  $: retryWaitJobsCount = Number(queueStats.retry_wait_jobs || 0);
+  $: pendingJobsCount = Number(
+    queueStats.pending_jobs ?? queuedJobsCount + retryWaitJobsCount
+  );
+  $: waitingSummary =
+    retryWaitJobsCount > 0
+      ? `${pendingJobsCount} waiting (${queuedJobsCount} queued, ${retryWaitJobsCount} retry wait)`
+      : `${pendingJobsCount} waiting`;
   $: footerSummary =
     queueStats.total_jobs === 0
       ? 'No downloads queued yet.'
-      : `${queueStats.terminal_jobs}/${queueStats.total_jobs} finished | ${queueStats.running_jobs} running | ${queueStats.queued_jobs} queued`;
+      : `${queueStats.terminal_jobs}/${queueStats.total_jobs} finished | ${queueStats.running_jobs} running | ${waitingSummary}`;
 
   function setFlash(message, isError = false) {
     flashMessage = message;
@@ -318,7 +332,18 @@
     }
 
     const pad = (value) => String(value).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}Z`;
+  }
+
+  function handleRowKeydown(event, jobId) {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      void handleRowClick(jobId);
+    }
   }
 
   function describeStatus(job) {
@@ -581,6 +606,12 @@
   }
 
   async function pollData() {
+    if (pollInFlight) {
+      return;
+    }
+
+    pollInFlight = true;
+
     try {
       const selectionChanged = await refreshJobsList();
       if (selectedJobId) {
@@ -588,6 +619,11 @@
       }
     } catch (error) {
       setFlash(error.message, true);
+    } finally {
+      pollInFlight = false;
+      if (isLoading) {
+        isLoading = false;
+      }
     }
   }
 
@@ -698,10 +734,17 @@
             emptyText="No downloads queued yet. Use 'Add Download...' to start."
             emptyColspan={4}
           >
-            {#each jobs.slice(0, uiSettings.recentJobsLimit) as job}
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <tr class:selected={selectedJobId === job.id} onclick={() => handleRowClick(job.id)}>
+            {#each visibleJobs as job}
+              <tr
+                class="job-row"
+                class:selected={selectedJobId === job.id}
+                role="button"
+                tabindex="0"
+                aria-label={`Select ${job.identifier}`}
+                aria-pressed={selectedJobId === job.id}
+                onclick={() => handleRowClick(job.id)}
+                onkeydown={(event) => handleRowKeydown(event, job.id)}
+              >
                 <td class="col-name">{job.identifier}</td>
                 <td class="col-progress">
                   <div class="row-progressbar">
@@ -732,6 +775,13 @@
               </tr>
             {/each}
           </DataTable>
+
+          {#if hiddenJobCount > 0}
+            <p class="table-hidden-indicator">
+              {hiddenJobCount} older {hiddenJobCount === 1 ? 'download is' : 'downloads are'} hidden. Increase
+              "Rows shown in table" in Settings to view more.
+            </p>
+          {/if}
         </section>
 
         <aside class="details-pane">

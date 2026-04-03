@@ -100,6 +100,8 @@ body {
   border-left: none;
   border-right: none;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .details-pane {
@@ -121,23 +123,29 @@ body {
 }
 
 .jobs-table {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .jobs-table .s7-data-table-root {
   height: 100%;
 }
 
-.jobs-table tbody tr:not(:has(.s7-data-table-placeholder)) {
+.jobs-table tbody tr.job-row {
   cursor: pointer;
 }
 
-.jobs-table tbody tr:not(:has(.s7-data-table-placeholder)):hover td {
+.jobs-table tbody tr.job-row:hover td {
   background: #f2f2f2;
 }
 
-.jobs-table tbody tr.selected td {
+.jobs-table tbody tr.job-row.selected td {
   background: #dce8ff;
+}
+
+.jobs-table tbody tr.job-row:focus-visible td {
+  outline: 2px solid #000;
+  outline-offset: -2px;
 }
 
 .jobs-table td.col-progress {
@@ -166,6 +174,14 @@ body {
   max-width: 360px;
   min-width: 0;
   box-sizing: border-box;
+}
+
+.table-hidden-indicator {
+  margin: 0;
+  padding: 0.35rem 0.65rem;
+  border-top: 1px solid #000;
+  background: #f9f5dc;
+  font-size: 0.9em;
 }
 
 .details-grid {

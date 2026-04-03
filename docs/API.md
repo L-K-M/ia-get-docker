@@ -2,6 +2,13 @@
 
 Base URL: `http://<host>:14637`
 
+Request body limit: `16 KiB` by default (`MAX_REQUEST_BODY_BYTES`). Oversized
+JSON payloads return `413` with:
+
+```json
+{ "error": "Request body too large (max 16384 bytes)." }
+```
+
 ## Authentication
 
 API endpoints under `/api/*` can be protected with a static API key. Set the
@@ -55,10 +62,12 @@ The following routes never require an API key:
 - `GET /api/jobs`
   - Returns recent jobs, current active job ID, and queue statistics.
   - Each job includes `queue_position` when status is `queued`.
+  - Structured timestamps and log-line prefixes are in UTC (`...Z`).
   - Includes `queue_stats`:
     - `total_jobs`
-    - `queued_jobs` (includes jobs in `retry_wait`)
+    - `queued_jobs` (ready-to-run queue only)
     - `retry_wait_jobs`
+    - `pending_jobs` (`queued_jobs + retry_wait_jobs`)
     - `running_jobs`
     - `completed_jobs`
     - `failed_jobs`
