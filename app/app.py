@@ -114,6 +114,7 @@ jobs_cv = threading.Condition(jobs_lock)
 scheduler_thread: Optional[threading.Thread] = None
 shutdown_requested = threading.Event()
 SHUTDOWN_WAIT_SECONDS = 8
+CANCEL_SIGKILL_TIMEOUT_SECONDS = 30
 
 
 def strip_ansi(text: str) -> str:
@@ -617,6 +618,54 @@ def handle_sigterm(signum: int, _frame: object) -> None:
 
 def register_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, handle_sigterm)
+
+
+def schedule_cancel_kill_watchdog(job_id: str, process: subprocess.Popen[str]) -> None:
+    def watchdog() -> None:
+        try:
+            process.wait(timeout=CANCEL_SIGKILL_TIMEOUT_SECONDS)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception as exc:
+            app.logger.warning(
+                "Error while waiting for ia-get process %s during cancel watchdog: %s",
+                process.pid,
+                exc,
+            )
+            return
+
+        if process.poll() is not None:
+            return
+
+        try:
+            process.kill()
+        except Exception as exc:
+            app.logger.warning(
+                "Failed to SIGKILL ia-get process %s after cancel timeout: %s",
+                process.pid,
+                exc,
+            )
+            return
+
+        with jobs_cv:
+            job = jobs.get(job_id)
+            if job is not None and job.process is process and job.status == "running":
+                append_log_line_locked(
+                    job,
+                    (
+                        "ia-get did not stop after cancellation request "
+                        f"({CANCEL_SIGKILL_TIMEOUT_SECONDS}s); sent SIGKILL"
+                    ),
+                )
+                persist_state_locked()
+                jobs_cv.notify_all()
+
+    threading.Thread(
+        target=watchdog,
+        daemon=True,
+        name=f"cancel-watchdog-{job_id}",
+    ).start()
 
 
 def resolve_auth_credentials(payload: dict[str, object]) -> tuple[Optional[str], Optional[str]]:
@@ -1268,6 +1317,7 @@ def cancel_job(job_id: str) -> tuple[dict[str, object], int]:
             process.send_signal(signal.SIGINT)
         except Exception:
             process.terminate()
+        schedule_cancel_kill_watchdog(job_id, process)
 
     with jobs_cv:
         current_job = jobs.get(job_id)
