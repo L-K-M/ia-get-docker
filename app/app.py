@@ -112,6 +112,8 @@ active_job_id: Optional[str] = None
 jobs_lock = threading.Lock()
 jobs_cv = threading.Condition(jobs_lock)
 scheduler_thread: Optional[threading.Thread] = None
+shutdown_requested = threading.Event()
+SHUTDOWN_WAIT_SECONDS = 8
 
 
 def strip_ansi(text: str) -> str:
@@ -493,10 +495,16 @@ def scheduler_loop() -> None:
     global active_job_id
 
     while True:
+        if shutdown_requested.is_set():
+            return
+
         next_job_id: Optional[str] = None
 
         with jobs_cv:
             while next_job_id is None:
+                if shutdown_requested.is_set():
+                    return
+
                 if active_job_id is None:
                     while queued_job_ids:
                         candidate_id = queued_job_ids.pop(0)
@@ -509,6 +517,9 @@ def scheduler_loop() -> None:
                 if next_job_id is None:
                     jobs_cv.wait()
 
+        if shutdown_requested.is_set():
+            return
+
         run_job(next_job_id)
 
 
@@ -516,6 +527,9 @@ def ensure_scheduler_started() -> None:
     global scheduler_thread
 
     with jobs_lock:
+        if shutdown_requested.is_set():
+            return
+
         if scheduler_thread is not None and scheduler_thread.is_alive():
             return
 
@@ -525,6 +539,84 @@ def ensure_scheduler_started() -> None:
             name="job-scheduler",
         )
         scheduler_thread.start()
+
+
+def collect_running_processes_locked() -> list[subprocess.Popen[str]]:
+    running_processes: list[subprocess.Popen[str]] = []
+
+    for job in jobs.values():
+        process = job.process
+        if process is None or process.poll() is not None:
+            continue
+
+        append_log_line_locked(job, "Shutdown requested; sending SIGINT to ia-get")
+        running_processes.append(process)
+
+    return running_processes
+
+
+def handle_sigterm(signum: int, _frame: object) -> None:
+    if shutdown_requested.is_set():
+        return
+
+    shutdown_requested.set()
+    app.logger.info("Received signal %s; starting graceful shutdown", signum)
+
+    running_processes: list[subprocess.Popen[str]] = []
+
+    try:
+        with jobs_cv:
+            running_processes = collect_running_processes_locked()
+            persist_state_locked()
+            jobs_cv.notify_all()
+
+        for process in running_processes:
+            if process.poll() is not None:
+                continue
+
+            try:
+                process.send_signal(signal.SIGINT)
+            except Exception as exc:
+                app.logger.warning(
+                    "Failed to signal ia-get process %s during shutdown: %s",
+                    process.pid,
+                    exc,
+                )
+
+        deadline = time.monotonic() + SHUTDOWN_WAIT_SECONDS
+        for process in running_processes:
+            if process.poll() is not None:
+                continue
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            try:
+                process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                app.logger.warning(
+                    "ia-get process %s did not exit before shutdown timeout",
+                    process.pid,
+                )
+                break
+            except Exception as exc:
+                app.logger.warning(
+                    "Error while waiting for ia-get process %s during shutdown: %s",
+                    process.pid,
+                    exc,
+                )
+    except Exception as exc:
+        app.logger.warning("Graceful shutdown encountered an error: %s", exc)
+
+    with jobs_cv:
+        persist_state_locked()
+
+    raise SystemExit(0)
+
+
+def register_signal_handlers() -> None:
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
 
 def resolve_auth_credentials(payload: dict[str, object]) -> tuple[Optional[str], Optional[str]]:
@@ -1222,6 +1314,7 @@ def main() -> None:
     DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     with jobs_cv:
         restore_state_locked()
+    register_signal_handlers()
     ensure_scheduler_started()
     app.run(host=HOST, port=PORT)
 
