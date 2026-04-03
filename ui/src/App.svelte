@@ -38,12 +38,14 @@
   let defaultAuthHint = 'Loading container defaults...';
   let containerDefaultUsername = '';
   let hasContainerDefaultPassword = false;
+  let hasContainerAuthDefaults = false;
 
   let showAddDialog = false;
   let addUrl = '';
   let addSubdir = '';
   let addUsername = '';
   let addPassword = '';
+  let forceAuthInput = false;
   let addError = '';
   let addSubmitting = false;
 
@@ -58,16 +60,17 @@
     recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
     defaultSubdir: '',
     defaultUsername: '',
-    retryDelayMinutes: 10
+    retryDelayMinutes: 10,
+    retryMaxAttempts: 3
   };
 
   let settingsOpen = false;
   let draftPollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
   let draftRecentJobsLimit = DEFAULT_RECENT_JOBS_LIMIT;
-  let draftAutoScrollLogs = true;
   let draftDefaultSubdir = '';
   let draftDefaultUsername = '';
   let draftRetryDelayMinutes = 10;
+  let draftRetryMaxAttempts = 3;
 
   const columns = [
     { key: 'name', label: 'Name', width: '31%', className: 'col-name' },
@@ -121,7 +124,8 @@
         recentJobsLimit: clampInteger(parsed.recentJobsLimit, 3, 50, DEFAULT_RECENT_JOBS_LIMIT),
         defaultSubdir: String(parsed.defaultSubdir || '').trim(),
         defaultUsername: String(parsed.defaultUsername || '').trim(),
-        retryDelayMinutes: clampInteger(parsed.retryDelayMinutes, 0, 1440, 10)
+        retryDelayMinutes: clampInteger(parsed.retryDelayMinutes, 0, 1440, 10),
+        retryMaxAttempts: clampInteger(parsed.retryMaxAttempts, 0, 100, 3)
       };
     } catch {
       uiSettings = {
@@ -130,7 +134,8 @@
         recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
         defaultSubdir: '',
         defaultUsername: '',
-        retryDelayMinutes: 10
+        retryDelayMinutes: 10,
+        retryMaxAttempts: 3
       };
     }
   }
@@ -142,21 +147,22 @@
   function openSettings() {
     draftPollIntervalMs = uiSettings.pollIntervalMs;
     draftRecentJobsLimit = uiSettings.recentJobsLimit;
-    draftAutoScrollLogs = uiSettings.autoScrollLogs;
     draftDefaultSubdir = uiSettings.defaultSubdir;
     draftDefaultUsername = uiSettings.defaultUsername;
     draftRetryDelayMinutes = uiSettings.retryDelayMinutes;
+    draftRetryMaxAttempts = uiSettings.retryMaxAttempts;
     settingsOpen = true;
   }
 
   function saveSettings() {
     uiSettings = {
       pollIntervalMs: clampInteger(draftPollIntervalMs, 500, 10000, DEFAULT_POLL_INTERVAL_MS),
-      autoScrollLogs: Boolean(draftAutoScrollLogs),
+      autoScrollLogs: uiSettings.autoScrollLogs,
       recentJobsLimit: clampInteger(draftRecentJobsLimit, 3, 50, DEFAULT_RECENT_JOBS_LIMIT),
       defaultSubdir: String(draftDefaultSubdir || '').trim(),
       defaultUsername: String(draftDefaultUsername || '').trim(),
-      retryDelayMinutes: clampInteger(draftRetryDelayMinutes, 0, 1440, 10)
+      retryDelayMinutes: clampInteger(draftRetryDelayMinutes, 0, 1440, 10),
+      retryMaxAttempts: clampInteger(draftRetryMaxAttempts, 0, 100, 3)
     };
 
     persistUiSettings();
@@ -164,23 +170,17 @@
     startPolling();
   }
 
-  function resetSettings() {
+  function setAutoScrollLogs(enabled) {
     uiSettings = {
-      pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
-      autoScrollLogs: true,
-      recentJobsLimit: DEFAULT_RECENT_JOBS_LIMIT,
-      defaultSubdir: '',
-      defaultUsername: '',
-      retryDelayMinutes: 10
+      ...uiSettings,
+      autoScrollLogs: Boolean(enabled)
     };
 
     persistUiSettings();
-    draftPollIntervalMs = uiSettings.pollIntervalMs;
-    draftRecentJobsLimit = uiSettings.recentJobsLimit;
-    draftAutoScrollLogs = uiSettings.autoScrollLogs;
-    draftDefaultSubdir = uiSettings.defaultSubdir;
-    draftDefaultUsername = uiSettings.defaultUsername;
-    draftRetryDelayMinutes = uiSettings.retryDelayMinutes;
+
+    if (uiSettings.autoScrollLogs && detailLogOutput) {
+      detailLogOutput.scrollTop = detailLogOutput.scrollHeight;
+    }
   }
 
   async function api(path, options = {}) {
@@ -200,6 +200,12 @@
     hasContainerDefaultPassword = Boolean(config.has_default_password);
     const hasDefaultUser = Boolean(containerDefaultUsername);
     const hasDefaultPass = hasContainerDefaultPassword;
+    hasContainerAuthDefaults = hasDefaultUser && hasDefaultPass;
+
+    if (hasContainerAuthDefaults) {
+      defaultAuthHint = `Using container defaults for authenticated downloads (${containerDefaultUsername}).`;
+      return;
+    }
 
     if (!hasDefaultUser && !hasDefaultPass) {
       defaultAuthHint = 'No container auth defaults configured.';
@@ -400,6 +406,7 @@
       job.auth_enabled &&
       (!hasContainerDefaultPassword || containerDefaultUsername !== (job.auth_username || ''))
     ) {
+      forceAuthInput = true;
       addUrl = job.url;
       addSubdir = job.output_subdir || '';
       addUsername = job.auth_username || '';
@@ -414,7 +421,8 @@
       await queueDownload({
         url: job.url,
         subdir: job.output_subdir || '',
-        retry_delay_minutes: uiSettings.retryDelayMinutes
+        retry_delay_minutes: uiSettings.retryDelayMinutes,
+        max_retry_attempts: uiSettings.retryMaxAttempts
       });
     } catch (error) {
       setFlash(error.message, true);
@@ -431,10 +439,16 @@
     await loadSelectedJobLogs(false);
   }
 
+  function closeAddDownloadDialog() {
+    showAddDialog = false;
+    forceAuthInput = false;
+  }
+
   function openAddDownloadDialog() {
+    forceAuthInput = false;
     addUrl = '';
     addSubdir = uiSettings.defaultSubdir || '';
-    addUsername = uiSettings.defaultUsername || containerDefaultUsername || '';
+    addUsername = hasContainerAuthDefaults ? '' : uiSettings.defaultUsername || containerDefaultUsername || '';
     addPassword = '';
     addError = '';
     showAddDialog = true;
@@ -454,17 +468,18 @@
     const requestBody = {
       url,
       subdir: addSubdir.trim(),
-      retry_delay_minutes: uiSettings.retryDelayMinutes
+      retry_delay_minutes: uiSettings.retryDelayMinutes,
+      max_retry_attempts: uiSettings.retryMaxAttempts
     };
 
-    if (addUsername.trim().length > 0 || addPassword.length > 0) {
+    if ((!hasContainerAuthDefaults || forceAuthInput) && (addUsername.trim().length > 0 || addPassword.length > 0)) {
       requestBody.username = addUsername.trim();
       requestBody.password = addPassword;
     }
 
     try {
       await queueDownload(requestBody);
-      showAddDialog = false;
+      closeAddDownloadDialog();
       addPassword = '';
     } catch (error) {
       addError = error.message;
@@ -623,6 +638,7 @@
               <p><strong>Progress:</strong> {describeProgress(selectedJob)}</p>
               <p><strong>Files:</strong> {selectedJob.completed_files}/{selectedJob.total_files}</p>
               <p><strong>Retry Delay:</strong> {selectedJob.retry_delay_minutes || 0} minute(s)</p>
+              <p><strong>Retry Max:</strong> {selectedJob.max_retry_attempts || 0}</p>
               <p><strong>Retry Count:</strong> {selectedJob.retry_count || 0}</p>
               <p><strong>Next Retry:</strong> {formatTime(selectedJob.next_retry_at)}</p>
               <p><strong>Created:</strong> {formatTime(selectedJob.created_at)}</p>
@@ -641,6 +657,13 @@
             />
 
             <pre class="details-logs" bind:this={detailLogOutput}>{detailLogs.join('\n')}</pre>
+            <div class="logs-controls">
+              <Checkbox
+                checked={uiSettings.autoScrollLogs}
+                label="Auto-scroll logs"
+                onchange={setAutoScrollLogs}
+              />
+            </div>
           {:else}
             <p class="hint">Select a download to view details and logs.</p>
           {/if}
@@ -664,7 +687,7 @@
 </div>
 
 {#if showAddDialog}
-  <MovableDialog title="Queue Download" onclose={() => (showAddDialog = false)} width="540px">
+  <MovableDialog title="Queue Download" onclose={closeAddDownloadDialog} width="540px">
     <form class="dialog-form" onsubmit={handleAddDialogSubmit}>
       <div class="s7-form-group">
         <label for="add-url">Archive URL</label>
@@ -689,15 +712,17 @@
         />
       </div>
 
-      <div class="s7-form-group">
-        <label for="add-username">Archive.org username (optional)</label>
-        <input id="add-username" class="s7-input" type="text" bind:value={addUsername} />
-      </div>
+      {#if !hasContainerAuthDefaults || forceAuthInput}
+        <div class="s7-form-group">
+          <label for="add-username">Archive.org username (optional)</label>
+          <input id="add-username" class="s7-input" type="text" bind:value={addUsername} />
+        </div>
 
-      <div class="s7-form-group">
-        <label for="add-password">Archive.org password (optional)</label>
-        <input id="add-password" class="s7-input" type="password" bind:value={addPassword} />
-      </div>
+        <div class="s7-form-group">
+          <label for="add-password">Archive.org password (optional)</label>
+          <input id="add-password" class="s7-input" type="password" bind:value={addPassword} />
+        </div>
+      {/if}
 
       <p class="hint">{defaultAuthHint}</p>
       <p class="hint">Download root: <code>{downloadRoot}</code></p>
@@ -707,7 +732,7 @@
       {/if}
 
       <div class="dialog-actions">
-        <Button type="button" onclick={() => (showAddDialog = false)}>Cancel</Button>
+        <Button type="button" onclick={closeAddDownloadDialog}>Cancel</Button>
         <Button type="submit" variant="primary" disabled={addSubmitting}>
           {addSubmitting ? 'Queueing...' : 'Add to Queue'}
         </Button>
@@ -720,7 +745,13 @@
   <MovableDialog title="UI Settings" onclose={() => (settingsOpen = false)} width="420px">
     <div class="settings-form">
       <div class="s7-form-group">
-        <label for="poll-interval">Poll interval (ms)</label>
+        <label for="poll-interval" class="settings-label">
+          Poll interval (ms)
+          <span
+            class="balloon-help"
+            title="How often the UI refreshes queue and log data. Lower values feel more live but poll more often."
+            >?</span>
+        </label>
         <input
           id="poll-interval"
           class="s7-input"
@@ -733,7 +764,13 @@
       </div>
 
       <div class="s7-form-group">
-        <label for="recent-jobs-limit">Rows shown in table</label>
+        <label for="recent-jobs-limit" class="settings-label">
+          Rows shown in table
+          <span
+            class="balloon-help"
+            title="Maximum queue rows shown at once. Older rows are still kept and available through polling updates."
+            >?</span>
+        </label>
         <input
           id="recent-jobs-limit"
           class="s7-input"
@@ -746,7 +783,13 @@
       </div>
 
       <div class="s7-form-group">
-        <label for="default-subdir">Default subdirectory</label>
+        <label for="default-subdir" class="settings-label">
+          Default subdirectory
+          <span
+            class="balloon-help"
+            title="Pre-fills the Subdirectory field for new downloads. Leave blank to default to the archive identifier."
+            >?</span>
+        </label>
         <input
           id="default-subdir"
           class="s7-input"
@@ -756,19 +799,33 @@
         />
       </div>
 
-      <div class="s7-form-group">
-        <label for="default-username">Default archive username</label>
-        <input
-          id="default-username"
-          class="s7-input"
-          type="text"
-          placeholder="Prefill only (no password stored)"
-          bind:value={draftDefaultUsername}
-        />
-      </div>
+      {#if !hasContainerAuthDefaults}
+        <div class="s7-form-group">
+          <label for="default-username" class="settings-label">
+            Default archive username
+            <span
+              class="balloon-help"
+              title="Pre-fills the username field for new downloads when container-wide auth is not configured."
+              >?</span>
+          </label>
+          <input
+            id="default-username"
+            class="s7-input"
+            type="text"
+            placeholder="Prefill only (no password stored)"
+            bind:value={draftDefaultUsername}
+          />
+        </div>
+      {/if}
 
       <div class="s7-form-group">
-        <label for="retry-delay-minutes">Auto-retry failed downloads (minutes, 0 = off)</label>
+        <label for="retry-delay-minutes" class="settings-label">
+          Auto-retry delay (minutes, 0 = off)
+          <span
+            class="balloon-help"
+            title="Wait time before retrying a failed download. Set to 0 to disable automatic retries."
+            >?</span>
+        </label>
         <input
           id="retry-delay-minutes"
           class="s7-input"
@@ -780,16 +837,26 @@
         />
       </div>
 
-      <Checkbox
-        checked={draftAutoScrollLogs}
-        label="Auto-scroll logs"
-        onchange={(checked) => (draftAutoScrollLogs = checked)}
-      />
-
-      <p class="hint">Settings are stored in your browser only. Passwords are never saved.</p>
+      <div class="s7-form-group">
+        <label for="retry-max-attempts" class="settings-label">
+          Auto-retry max times
+          <span
+            class="balloon-help"
+            title="Maximum automatic retry attempts after failures. Set to 0 for unlimited retries."
+            >?</span>
+        </label>
+        <input
+          id="retry-max-attempts"
+          class="s7-input"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          bind:value={draftRetryMaxAttempts}
+        />
+      </div>
 
       <div class="dialog-actions settings-actions">
-        <Button onclick={resetSettings}>Reset</Button>
         <Button onclick={() => (settingsOpen = false)}>Cancel</Button>
         <Button variant="primary" onclick={saveSettings}>Save</Button>
       </div>

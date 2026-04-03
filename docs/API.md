@@ -43,15 +43,17 @@ Base URL: `http://<host>:14637`
   "subdir": "optional/custom/subfolder",
   "username": "optional archive.org username",
   "password": "optional archive.org password",
-  "retry_delay_minutes": 10
+  "retry_delay_minutes": 10,
+  "max_retry_attempts": 3
 }
 ```
 
   - `url` must match `https://archive.org/details/<identifier>`.
   - `subdir` is optional and must stay inside `/downloads`.
-  - `username` and `password` are optional, but must be supplied together.
-  - If omitted, server-side defaults (`IA_USERNAME`, `IA_PASSWORD`) are used when configured.
-  - `retry_delay_minutes` controls automatic requeue on failure (`0` disables auto-retry).
+- `username` and `password` are optional, but must be supplied together.
+- If omitted, server-side defaults (`IA_USERNAME`, `IA_PASSWORD`) are used when configured.
+- `retry_delay_minutes` controls automatic requeue on failure (`0` disables auto-retry).
+- `max_retry_attempts` sets how many automatic retries are allowed (`0` means unlimited retries).
 
 - `GET /api/jobs/<job_id>`
   - Returns one job status.

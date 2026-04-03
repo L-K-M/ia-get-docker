@@ -62,6 +62,7 @@ class Job:
     auth_username: Optional[str] = None
     auth_password: Optional[str] = field(default=None, repr=False)
     retry_delay_minutes: int = 0
+    max_retry_attempts: int = 0
     retry_count: int = 0
     next_retry_at: Optional[str] = None
     cancel_requested: bool = False
@@ -142,6 +143,7 @@ def serialize_job(job: Job, queue_position: Optional[int] = None) -> dict[str, o
         "auth_enabled": bool(job.auth_username),
         "auth_username": job.auth_username,
         "retry_delay_minutes": job.retry_delay_minutes,
+        "max_retry_attempts": job.max_retry_attempts,
         "retry_count": job.retry_count,
         "next_retry_at": job.next_retry_at,
         "cancel_requested": job.cancel_requested,
@@ -178,6 +180,7 @@ def job_to_state_dict(job: Job) -> dict[str, object]:
         "completed_files": job.completed_files,
         "auth_username": job.auth_username,
         "retry_delay_minutes": job.retry_delay_minutes,
+        "max_retry_attempts": job.max_retry_attempts,
         "retry_count": job.retry_count,
         "next_retry_at": job.next_retry_at,
         "cancel_requested": job.cancel_requested,
@@ -213,13 +216,23 @@ def state_dict_to_job(data: object) -> Optional[Job]:
     return_code = data.get("return_code")
     job.return_code = int(return_code) if isinstance(return_code, int) else None
 
-    for numeric_field in ["total_files", "current_file", "completed_files", "retry_delay_minutes", "retry_count"]:
+    for numeric_field in [
+        "total_files",
+        "current_file",
+        "completed_files",
+        "retry_delay_minutes",
+        "max_retry_attempts",
+        "retry_count",
+    ]:
         raw_value = data.get(numeric_field)
         if isinstance(raw_value, int):
             setattr(job, numeric_field, raw_value)
 
     if job.retry_delay_minutes < 0:
         job.retry_delay_minutes = 0
+
+    if job.max_retry_attempts < 0:
+        job.max_retry_attempts = 0
 
     if job.retry_count < 0:
         job.retry_count = 0
@@ -530,6 +543,25 @@ def resolve_retry_delay_minutes(payload: dict[str, object]) -> int:
     return retry_minutes
 
 
+def resolve_max_retry_attempts(payload: dict[str, object]) -> int:
+    raw_value = payload.get("max_retry_attempts", 0)
+    if raw_value is None or raw_value == "":
+        return 0
+
+    try:
+        max_attempts = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError("max_retry_attempts must be an integer") from None
+
+    if max_attempts < 0:
+        raise ValueError("max_retry_attempts cannot be negative")
+
+    if max_attempts > 100:
+        raise ValueError("max_retry_attempts cannot exceed 100")
+
+    return max_attempts
+
+
 def schedule_retry_after_delay(job_id: str, delay_seconds: int) -> None:
     def retry_worker() -> None:
         deadline = time.monotonic() + max(0, delay_seconds)
@@ -766,7 +798,12 @@ def run_job(job_id: str) -> None:
             final_job.message = "Download complete"
             final_job.next_retry_at = None
         else:
-            if final_job.retry_delay_minutes > 0:
+            can_auto_retry = final_job.retry_delay_minutes > 0 and (
+                final_job.max_retry_attempts <= 0
+                or final_job.retry_count < final_job.max_retry_attempts
+            )
+
+            if can_auto_retry:
                 final_job.status = "retry_wait"
                 final_job.retry_count += 1
                 retry_delay_seconds = final_job.retry_delay_minutes * 60
@@ -780,8 +817,19 @@ def run_job(job_id: str) -> None:
                 )
             else:
                 final_job.status = "failed"
-                final_job.message = f"ia-get exited with code {return_code}"
                 final_job.next_retry_at = None
+
+                if (
+                    final_job.retry_delay_minutes > 0
+                    and final_job.max_retry_attempts > 0
+                    and final_job.retry_count >= final_job.max_retry_attempts
+                ):
+                    final_job.message = (
+                        f"ia-get exited with code {return_code}; "
+                        f"retry limit reached ({final_job.max_retry_attempts})"
+                    )
+                else:
+                    final_job.message = f"ia-get exited with code {return_code}"
 
         append_log_line_locked(final_job, f"Job finished with status: {final_job.status}")
         if final_job.status == "retry_wait" and final_job.next_retry_at:
@@ -907,6 +955,11 @@ def create_job() -> tuple[dict[str, object], int]:
         return {"error": str(exc)}, 400
 
     try:
+        max_retry_attempts = resolve_max_retry_attempts(payload)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    try:
         output_subdir, output_path = resolve_target_path(subdir, identifier)
     except ValueError as exc:
         return {"error": str(exc)}, 400
@@ -922,6 +975,7 @@ def create_job() -> tuple[dict[str, object], int]:
             auth_username=auth_username,
             auth_password=auth_password,
             retry_delay_minutes=retry_delay_minutes,
+            max_retry_attempts=max_retry_attempts,
             message="Queued",
         )
         jobs[job_id] = job
