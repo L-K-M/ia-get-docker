@@ -128,11 +128,11 @@ body {
   height: 100%;
 }
 
-.jobs-table tbody tr {
+.jobs-table tbody tr:not(:has(.s7-data-table-placeholder)) {
   cursor: pointer;
 }
 
-.jobs-table tbody tr:hover td {
+.jobs-table tbody tr:not(:has(.s7-data-table-placeholder)):hover td {
   background: #f2f2f2;
 }
 
