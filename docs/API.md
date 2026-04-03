@@ -2,6 +2,40 @@
 
 Base URL: `http://<host>:14637`
 
+## Authentication
+
+API endpoints under `/api/*` can be protected with a static API key. Set the
+`API_KEY` environment variable to enable this. When enabled, every request to
+`/api/*` (except `/api/auth-status`) must include an `X-API-Key` header whose
+value matches the configured key.
+
+```
+X-API-Key: your-secret-key
+```
+
+Requests with a missing or incorrect key receive a `401` response:
+
+```json
+{ "error": "Invalid or missing API key." }
+```
+
+When `API_KEY` is not set (the default), all endpoints are accessible without
+authentication. This is suitable for trusted LAN deployments.
+
+### Auth-exempt routes
+
+The following routes never require an API key:
+
+- `GET /` , `GET /index.html` , `GET /assets/*` (static UI)
+- `GET /healthz` (health check)
+- `GET /api/auth-status` (tells clients whether auth is enabled)
+
+### Auth status
+
+- `GET /api/auth-status`
+  - Returns `{ "auth_required": true }` when `API_KEY` is set, `false` otherwise.
+  - Always accessible without a key.
+
 ## Health
 
 - `GET /healthz`

@@ -38,6 +38,7 @@ STATE_FILE = Path(
     os.environ.get("STATE_FILE", str(DOWNLOAD_ROOT / ".ia-get-web-state.json"))
 ).resolve()
 STATE_LOG_LINES = int(os.environ.get("STATE_LOG_LINES", "200"))
+API_KEY = os.environ.get("API_KEY", "").strip()
 
 
 def now_iso() -> str:
@@ -72,6 +73,29 @@ class Job:
 
 
 app = Flask(__name__)
+
+AUTH_EXEMPT_EXACT = ("/", "/index.html", "/healthz", "/api/auth-status")
+AUTH_EXEMPT_PREFIXES = ("/assets/",)
+
+
+@app.before_request
+def check_api_key() -> tuple[dict[str, str], int] | None:
+    if not API_KEY:
+        return None
+    if request.path in AUTH_EXEMPT_EXACT:
+        return None
+    if any(request.path.startswith(p) for p in AUTH_EXEMPT_PREFIXES):
+        return None
+    key = request.headers.get("X-API-Key", "")
+    if key != API_KEY:
+        return {"error": "Invalid or missing API key."}, 401
+    return None
+
+
+@app.get("/api/auth-status")
+def auth_status() -> tuple[dict[str, object], int]:
+    return {"auth_required": bool(API_KEY)}, 200
+
 
 jobs: dict[str, Job] = {}
 queued_job_ids: list[str] = []

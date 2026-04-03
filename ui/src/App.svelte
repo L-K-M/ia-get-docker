@@ -11,6 +11,7 @@
   } from '@lkmc/system7-ui';
 
   const UI_SETTINGS_KEY = 'ia-get-ui-settings-v3';
+  const API_KEY_STORAGE_KEY = 'ia-get-api-key';
   const DEFAULT_POLL_INTERVAL_MS = 1200;
   const DEFAULT_RECENT_JOBS_LIMIT = 12;
 
@@ -33,6 +34,12 @@
   let flashError = false;
   let pollTimer = null;
   let clearingFinished = false;
+
+  let authRequired = false;
+  let apiKey = '';
+  let showApiKeyDialog = false;
+  let draftApiKey = '';
+  let apiKeyError = '';
 
   let downloadRoot = '/downloads';
   let defaultAuthHint = 'Loading container defaults...';
@@ -185,7 +192,16 @@
   }
 
   async function api(path, options = {}) {
+    if (apiKey) {
+      options.headers = { ...options.headers, 'X-API-Key': apiKey };
+    }
     const response = await fetch(path, options);
+
+    if (response.status === 401 && authRequired) {
+      showApiKeyPrompt();
+      throw new Error('API key required. Enter a valid key to continue.');
+    }
+
     const body = await response.json().catch(() => ({}));
 
     if (!response.ok) {
@@ -193,6 +209,53 @@
     }
 
     return body;
+  }
+
+  function showApiKeyPrompt() {
+    draftApiKey = '';
+    apiKeyError = '';
+    showApiKeyDialog = true;
+    stopPolling();
+  }
+
+  async function submitApiKey() {
+    const candidateKey = draftApiKey.trim();
+    if (!candidateKey) {
+      apiKeyError = 'Please enter an API key.';
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/config', {
+        headers: { 'X-API-Key': candidateKey }
+      });
+      if (response.status === 401) {
+        apiKeyError = 'Invalid API key.';
+        return;
+      }
+      if (!response.ok) {
+        apiKeyError = `Server error (${response.status}).`;
+        return;
+      }
+
+      apiKey = candidateKey;
+      window.sessionStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+      showApiKeyDialog = false;
+      apiKeyError = '';
+      draftApiKey = '';
+
+      const config = await response.json();
+      applyConfig(config);
+      await pollData();
+      startPolling();
+    } catch (error) {
+      apiKeyError = error.message || 'Unable to reach server.';
+    }
+  }
+
+  function handleApiKeySubmit(event) {
+    event.preventDefault();
+    void submitApiKey();
   }
 
   function applyConfig(config) {
@@ -569,9 +632,30 @@
     loadStoredUiSettings();
 
     try {
+      const authRes = await fetch('/api/auth-status');
+      const authData = await authRes.json().catch(() => ({}));
+      authRequired = Boolean(authData.auth_required);
+    } catch {
+      authRequired = false;
+    }
+
+    if (authRequired) {
+      const storedKey = window.sessionStorage.getItem(API_KEY_STORAGE_KEY) || '';
+      if (storedKey) {
+        apiKey = storedKey;
+      } else {
+        showApiKeyPrompt();
+        return;
+      }
+    }
+
+    try {
       const config = await api('/api/config');
       applyConfig(config);
     } catch (error) {
+      if (authRequired && !apiKey) {
+        return;
+      }
       setFlash(error.message, true);
       defaultAuthHint = 'Unable to load container defaults.';
     }
@@ -885,5 +969,30 @@
         <Button variant="primary" onclick={saveSettings}>Save</Button>
       </div>
     </div>
+  </MovableDialog>
+{/if}
+
+{#if showApiKeyDialog}
+  <MovableDialog title="API Key Required" width="400px">
+    <form class="dialog-form" onsubmit={handleApiKeySubmit}>
+      <div class="s7-form-group">
+        <label for="api-key-input">Enter API key to access this instance:</label>
+        <input
+          id="api-key-input"
+          class="s7-input"
+          type="password"
+          placeholder="API key"
+          bind:value={draftApiKey}
+        />
+      </div>
+
+      {#if apiKeyError}
+        <p class="dialog-error">{apiKeyError}</p>
+      {/if}
+
+      <div class="dialog-actions">
+        <Button type="submit" variant="primary">Unlock</Button>
+      </div>
+    </form>
   </MovableDialog>
 {/if}
