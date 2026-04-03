@@ -23,7 +23,7 @@ Base URL: `http://<host>:14637`
   - Each job includes `queue_position` when status is `queued`.
   - Includes `queue_stats`:
     - `total_jobs`
-    - `queued_jobs`
+    - `queued_jobs` (includes jobs in `retry_wait`)
     - `retry_wait_jobs`
     - `running_jobs`
     - `completed_jobs`
@@ -85,6 +85,7 @@ Base URL: `http://<host>:14637`
 - `POST /api/jobs/clear-finished`
   - Removes inactive history rows (`completed`, `failed`, `cancelled`).
   - Keeps active rows (`queued`, `running`, `retry_wait`).
+  - In the web UI, this is wired to the **Clear Inactive** action.
 
 ## Job status values
 

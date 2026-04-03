@@ -41,7 +41,7 @@ https://archive.org/details/Something
 Downloads will be written to the mounted host directory defined by `DOWNLOADS_PATH` in `.env`.
 
 Queue state is persisted in the downloads volume, so active/queued transfers stay visible across container restarts.
-Use **Clear Finished** in the UI to remove completed/failed/cancelled history rows.
+Use **Clear Inactive** in the UI to remove completed/failed/cancelled history rows.
 
 ## Docker Compose configuration
 
@@ -65,13 +65,13 @@ Key values in `.env`:
 If you want CLI behavior only, override the container command:
 
 ```bash
-docker compose run --rm ia-get-web /usr/local/bin/ia-get https://archive.org/details/<identifier>
+docker compose run --rm -w /downloads ia-get-web /usr/local/bin/ia-get https://archive.org/details/<identifier>
 ```
 
 Authenticated CLI example:
 
 ```bash
-printf '%s' "$IA_PASSWORD" | docker compose run --rm ia-get-web /usr/local/bin/ia-get --username <email-or-username> --password-stdin https://archive.org/details/<identifier>
+printf '%s' "$IA_PASSWORD" | docker compose run --rm -w /downloads ia-get-web /usr/local/bin/ia-get --username <email-or-username> --password-stdin https://archive.org/details/<identifier>
 ```
 
 The compose volume still controls where files are written.
