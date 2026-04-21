@@ -7,7 +7,8 @@
     ErrorBanner,
     MovableDialog,
     ProgressBar,
-    TitleBar
+    TitleBar,
+    TrashIcon
   } from '@lkmc/system7-ui';
 
   const UI_SETTINGS_KEY = 'ia-get-ui-settings-v3';
@@ -40,6 +41,7 @@
   let clearingFinished = false;
   let cancellingJobIds = new Set();
   let retryingJobIds = new Set();
+  let deletingJobIds = new Set();
 
   let authRequired = false;
   let apiKey = '';
@@ -89,11 +91,11 @@
   let draftRetryMaxAttempts = 3;
 
   const columns = [
-    { key: 'name', label: 'Name', width: '24%', className: 'col-name' },
+    { key: 'name', label: 'Name', width: '22%', className: 'col-name' },
     { key: 'status', label: 'Status', width: '14%', className: 'col-status' },
-    { key: 'progress', label: 'Progress', width: '34%', className: 'col-progress' },
+    { key: 'progress', label: 'Progress', width: '32%', className: 'col-progress' },
     { key: 'files', label: 'Files', width: '12%', className: 'col-files' },
-    { key: 'actions', label: 'Actions', width: '16%', className: 'col-actions' }
+    { key: 'actions', label: 'Actions', width: '20%', className: 'col-actions' }
   ];
 
   const STATUS_LABELS = {
@@ -543,6 +545,40 @@
     }
   }
 
+  function canDelete(job) {
+    if (!job) {
+      return false;
+    }
+    return ['completed', 'failed', 'cancelled'].includes(job.status);
+  }
+
+  async function handleRowDelete(event, job) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!job || !canDelete(job) || deletingJobIds.has(job.id)) {
+      return;
+    }
+
+    deletingJobIds = markJobActionPending(deletingJobIds, job.id, true);
+
+    try {
+      await api(`/api/jobs/${job.id}`, { method: 'DELETE' });
+      if (selectedJobId === job.id) {
+        selectedJobId = null;
+        resetDetailLogs();
+      }
+      await refreshJobsList();
+      if (selectedJobId) {
+        await loadSelectedJobLogs(true);
+      }
+    } catch (error) {
+      setFlash(error.message, true);
+    } finally {
+      deletingJobIds = markJobActionPending(deletingJobIds, job.id, false);
+    }
+  }
+
   async function queueDownload(requestBody) {
     const payload = await api('/api/jobs', {
       method: 'POST',
@@ -844,25 +880,39 @@
                 </td>
                 <td class="col-files">{job.completed_files}/{job.total_files}</td>
                 <td class="col-actions">
-                  {#if job.status === 'failed' || job.status === 'cancelled'}
-                    <Button
-                      onclick={(event) => handleRowRetry(event, job)}
-                      disabled={retryingJobIds.has(job.id)}
-                    >
-                      {#if retryingJobIds.has(job.id)}
-                        {job.status === 'cancelled' ? 'Restarting...' : 'Retrying...'}
-                      {:else}
-                        {job.status === 'cancelled' ? 'Restart' : 'Try Again'}
-                      {/if}
-                    </Button>
-                  {:else}
-                    <Button
-                      onclick={(event) => handleRowCancel(event, job.id)}
-                      disabled={!canCancel(job) || cancellingJobIds.has(job.id)}
-                    >
-                      {cancellingJobIds.has(job.id) ? 'Cancelling...' : 'Cancel'}
-                    </Button>
-                  {/if}
+                  <div class="row-actions">
+                    {#if job.status === 'failed' || job.status === 'cancelled'}
+                      <Button
+                        onclick={(event) => handleRowRetry(event, job)}
+                        disabled={retryingJobIds.has(job.id)}
+                      >
+                        {#if retryingJobIds.has(job.id)}
+                          {job.status === 'cancelled' ? 'Restarting...' : 'Retrying...'}
+                        {:else}
+                          {job.status === 'cancelled' ? 'Restart' : 'Try Again'}
+                        {/if}
+                      </Button>
+                    {:else}
+                      <Button
+                        onclick={(event) => handleRowCancel(event, job.id)}
+                        disabled={!canCancel(job) || cancellingJobIds.has(job.id)}
+                      >
+                        {cancellingJobIds.has(job.id) ? 'Cancelling...' : 'Cancel'}
+                      </Button>
+                    {/if}
+                    {#if canDelete(job)}
+                      <button
+                        type="button"
+                        class="icon-button"
+                        aria-label="Delete download"
+                        title={deletingJobIds.has(job.id) ? 'Deleting...' : 'Delete'}
+                        disabled={deletingJobIds.has(job.id)}
+                        onclick={(event) => handleRowDelete(event, job)}
+                      >
+                        <TrashIcon size={18} alt="Delete" />
+                      </button>
+                    {/if}
+                  </div>
                 </td>
               </tr>
             {/each}

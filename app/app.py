@@ -1385,6 +1385,39 @@ def clear_finished_jobs() -> tuple[dict[str, object], int]:
     return payload, 200
 
 
+@app.delete("/api/jobs/<job_id>")
+def delete_job(job_id: str) -> tuple[dict[str, object], int]:
+    with jobs_cv:
+        job = jobs.get(job_id)
+        if job is None:
+            return {"error": "Job not found"}, 404
+
+        if job.status not in TERMINAL_STATES:
+            return (
+                {
+                    "error": (
+                        f"Job is {job.status} and cannot be deleted. "
+                        "Cancel it first, then delete."
+                    )
+                },
+                409,
+            )
+
+        jobs.pop(job_id, None)
+        if job_id in queued_job_ids:
+            queued_job_ids.remove(job_id)
+
+        persist_state_locked()
+
+        payload = {
+            "ok": True,
+            "deleted": job_id,
+            "queue_stats": build_queue_stats_locked(),
+        }
+
+    return payload, 200
+
+
 def main() -> None:
     DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     with jobs_cv:

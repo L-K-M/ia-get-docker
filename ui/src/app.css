@@ -169,6 +169,42 @@ body {
   padding-right: 12px;
 }
 
+.jobs-table td.col-actions .row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.jobs-table td.col-actions .icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid #000;
+  border-radius: 3px;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.jobs-table td.col-actions .icon-button:hover:not(:disabled) {
+  background: #eaeaea;
+}
+
+.jobs-table td.col-actions .icon-button:active:not(:disabled) {
+  background: #d0d0d0;
+  box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.jobs-table td.col-actions .icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .row-progressbar {
   width: calc(100% - 28px);
   max-width: 360px;
