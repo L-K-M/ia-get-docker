@@ -91,10 +91,10 @@
   let draftRetryMaxAttempts = 3;
 
   const columns = [
-    { key: 'name', label: 'Name', width: '22%', className: 'col-name' },
-    { key: 'status', label: 'Status', width: '14%', className: 'col-status' },
-    { key: 'progress', label: 'Progress', width: '32%', className: 'col-progress' },
-    { key: 'files', label: 'Files', width: '12%', className: 'col-files' },
+    { key: 'name', label: 'Name', width: '22%', className: 'col-name', sortable: true },
+    { key: 'status', label: 'Status', width: '14%', className: 'col-status', sortable: true },
+    { key: 'progress', label: 'Progress', width: '32%', className: 'col-progress', sortable: true },
+    { key: 'files', label: 'Files', width: '12%', className: 'col-files', sortable: true },
     { key: 'actions', label: 'Actions', width: '20%', className: 'col-actions' }
   ];
 
@@ -107,6 +107,18 @@
     cancelled: 'Cancelled'
   };
 
+  const STATUS_SORT_ORDER = {
+    running: 0,
+    queued: 1,
+    retry_wait: 2,
+    failed: 3,
+    cancelled: 4,
+    completed: 5
+  };
+
+  let sortKey = null;
+  let sortDirection = 'asc';
+
   function statusLabel(job) {
     if (!job) {
       return 'Unknown';
@@ -117,20 +129,69 @@
     return STATUS_LABELS[job.status] || (job.status ? job.status.replace(/_/g, ' ') : 'Unknown');
   }
 
-  function statusClass(job) {
+  function statusDetail(job) {
     if (!job) {
-      return 'status-unknown';
+      return '';
     }
-    if (job.cancel_requested && job.status === 'running') {
-      return 'status-cancelling';
+    if (job.status === 'queued' && job.queue_position) {
+      return `#${job.queue_position}`;
     }
-    return `status-${(job.status || 'unknown').replace(/_/g, '-')}`;
+    if (job.status === 'retry_wait') {
+      const retryAt = job.next_retry_at ? new Date(job.next_retry_at) : null;
+      if (retryAt && !Number.isNaN(retryAt.getTime())) {
+        const remainingMinutes = Math.max(0, Math.ceil((retryAt.getTime() - Date.now()) / 60000));
+        return `in ${remainingMinutes}m`;
+      }
+    }
+    return '';
+  }
+
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+  function compareJobsByKey(a, b, key) {
+    switch (key) {
+      case 'name':
+        return collator.compare(a.identifier || '', b.identifier || '');
+      case 'status': {
+        const aOrder = STATUS_SORT_ORDER[a.status] ?? 99;
+        const bOrder = STATUS_SORT_ORDER[b.status] ?? 99;
+        return aOrder - bOrder;
+      }
+      case 'progress':
+        return getJobProgressNumber(a) - getJobProgressNumber(b);
+      case 'files':
+        return Number(a.total_files || 0) - Number(b.total_files || 0);
+      default:
+        return 0;
+    }
+  }
+
+  function sortJobs(list, key, direction) {
+    const copy = [...list];
+    copy.sort((a, b) => {
+      const result = compareJobsByKey(a, b, key);
+      if (result !== 0) {
+        return direction === 'asc' ? result : -result;
+      }
+      return collator.compare(a.identifier || '', b.identifier || '');
+    });
+    return copy;
+  }
+
+  function handleSort(key) {
+    if (sortKey === key) {
+      sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      return;
+    }
+    sortKey = key;
+    sortDirection = 'asc';
   }
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
   $: hasFinishedJobs = jobs.some((item) => ['completed', 'failed', 'cancelled'].includes(item.status));
-  $: visibleJobs = jobs.slice(0, uiSettings.recentJobsLimit);
-  $: hiddenJobCount = Math.max(0, jobs.length - visibleJobs.length);
+  $: sortedJobs = sortKey ? sortJobs(jobs, sortKey, sortDirection) : jobs;
+  $: visibleJobs = sortedJobs.slice(0, uiSettings.recentJobsLimit);
+  $: hiddenJobCount = Math.max(0, sortedJobs.length - visibleJobs.length);
   $: queuedJobsCount = Number(queueStats.queued_jobs || 0);
   $: retryWaitJobsCount = Number(queueStats.retry_wait_jobs || 0);
   $: pendingJobsCount = Number(
@@ -844,6 +905,9 @@
           <DataTable
             class="jobs-table"
             columns={columns}
+            sortKey={sortKey}
+            sortDirection={sortDirection}
+            onSort={handleSort}
             loading={isLoading && jobs.length === 0}
             loadingText="Loading queue..."
             empty={!isLoading && jobs.length === 0}
@@ -862,10 +926,8 @@
                 onkeydown={(event) => handleRowKeydown(event, job.id)}
               >
                 <td class="col-name">{job.identifier}</td>
-                <td class="col-status">
-                  <span class="status-badge {statusClass(job)}" title={describeStatus(job)}>
-                    {statusLabel(job)}
-                  </span>
+                <td class="col-status" title={describeStatus(job)}>
+                  {statusLabel(job)}{#if statusDetail(job)} <span class="status-detail">({statusDetail(job)})</span>{/if}
                 </td>
                 <td class="col-progress">
                   <div class="row-progressbar">
@@ -901,16 +963,14 @@
                       </Button>
                     {/if}
                     {#if canDelete(job)}
-                      <button
-                        type="button"
-                        class="icon-button"
-                        aria-label="Delete download"
+                      <Button
+                        variant="icon"
                         title={deletingJobIds.has(job.id) ? 'Deleting...' : 'Delete'}
                         disabled={deletingJobIds.has(job.id)}
                         onclick={(event) => handleRowDelete(event, job)}
                       >
-                        <TrashIcon size={18} alt="Delete" />
-                      </button>
+                        <TrashIcon size={16} alt="Delete" />
+                      </Button>
                     {/if}
                   </div>
                 </td>
@@ -931,7 +991,7 @@
 
           {#if selectedJob}
             <div class="details-grid">
-              <p><strong>Status:</strong> <span class="status-badge {statusClass(selectedJob)}">{statusLabel(selectedJob)}</span> <span class="status-detail">{describeStatus(selectedJob)}</span></p>
+              <p><strong>Status:</strong> {statusLabel(selectedJob)}{#if statusDetail(selectedJob)} ({statusDetail(selectedJob)}){/if}</p>
               <p><strong>Name:</strong> {selectedJob.identifier}</p>
               <p><strong>URL:</strong> {selectedJob.url}</p>
               <p><strong>Output:</strong> {selectedJob.output_subdir}</p>
