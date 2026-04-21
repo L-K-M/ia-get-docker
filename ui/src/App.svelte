@@ -89,11 +89,41 @@
   let draftRetryMaxAttempts = 3;
 
   const columns = [
-    { key: 'name', label: 'Name', width: '31%', className: 'col-name' },
-    { key: 'progress', label: 'Progress', width: '41%', className: 'col-progress' },
+    { key: 'name', label: 'Name', width: '24%', className: 'col-name' },
+    { key: 'status', label: 'Status', width: '14%', className: 'col-status' },
+    { key: 'progress', label: 'Progress', width: '34%', className: 'col-progress' },
     { key: 'files', label: 'Files', width: '12%', className: 'col-files' },
     { key: 'actions', label: 'Actions', width: '16%', className: 'col-actions' }
   ];
+
+  const STATUS_LABELS = {
+    queued: 'Queued',
+    running: 'Downloading',
+    retry_wait: 'Retrying',
+    completed: 'Finished',
+    failed: 'Error',
+    cancelled: 'Cancelled'
+  };
+
+  function statusLabel(job) {
+    if (!job) {
+      return 'Unknown';
+    }
+    if (job.cancel_requested && job.status === 'running') {
+      return 'Cancelling';
+    }
+    return STATUS_LABELS[job.status] || (job.status ? job.status.replace(/_/g, ' ') : 'Unknown');
+  }
+
+  function statusClass(job) {
+    if (!job) {
+      return 'status-unknown';
+    }
+    if (job.cancel_requested && job.status === 'running') {
+      return 'status-cancelling';
+    }
+    return `status-${(job.status || 'unknown').replace(/_/g, '-')}`;
+  }
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
   $: hasFinishedJobs = jobs.some((item) => ['completed', 'failed', 'cancelled'].includes(item.status));
@@ -782,7 +812,7 @@
             loadingText="Loading queue..."
             empty={!isLoading && jobs.length === 0}
             emptyText="No downloads queued yet. Use 'Add Download...' to start."
-            emptyColspan={4}
+            emptyColspan={5}
           >
             {#each visibleJobs as job}
               <tr
@@ -796,6 +826,11 @@
                 onkeydown={(event) => handleRowKeydown(event, job.id)}
               >
                 <td class="col-name">{job.identifier}</td>
+                <td class="col-status">
+                  <span class="status-badge {statusClass(job)}" title={describeStatus(job)}>
+                    {statusLabel(job)}
+                  </span>
+                </td>
                 <td class="col-progress">
                   <div class="row-progressbar">
                     <ProgressBar
@@ -846,7 +881,7 @@
 
           {#if selectedJob}
             <div class="details-grid">
-              <p><strong>Status:</strong> {describeStatus(selectedJob)}</p>
+              <p><strong>Status:</strong> <span class="status-badge {statusClass(selectedJob)}">{statusLabel(selectedJob)}</span> <span class="status-detail">{describeStatus(selectedJob)}</span></p>
               <p><strong>Name:</strong> {selectedJob.identifier}</p>
               <p><strong>URL:</strong> {selectedJob.url}</p>
               <p><strong>Output:</strong> {selectedJob.output_subdir}</p>
