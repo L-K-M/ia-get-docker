@@ -1034,6 +1034,12 @@ def ui_assets(asset_path: str) -> object:
     return send_from_directory(str(assets_dir), asset_path)
 
 
+@app.get("/img/<path:asset_path>")
+def ui_images(asset_path: str) -> object:
+    images_dir = WEB_ROOT / "img"
+    return send_from_directory(str(images_dir), asset_path)
+
+
 @app.get("/index.html")
 def index_alias() -> tuple[dict[str, str], int] | object:
     return index()
