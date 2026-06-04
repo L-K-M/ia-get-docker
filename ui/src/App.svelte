@@ -188,6 +188,7 @@
   }
 
   $: selectedJob = jobs.find((item) => item.id === selectedJobId) || null;
+  $: selectedJobUrl = selectedJob ? safeExternalUrl(selectedJob.url) : '';
   $: hasFinishedJobs = jobs.some((item) => ['completed', 'failed', 'cancelled'].includes(item.status));
   $: sortedJobs = sortKey ? sortJobs(jobs, sortKey, sortDirection) : jobs;
   $: visibleJobs = sortedJobs.slice(0, uiSettings.recentJobsLimit);
@@ -613,6 +614,19 @@
     return ['completed', 'failed', 'cancelled'].includes(job.status);
   }
 
+  function safeExternalUrl(url) {
+    if (!url) {
+      return '';
+    }
+
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+    } catch {
+      return '';
+    }
+  }
+
   async function handleRowDelete(event, job) {
     event.preventDefault();
     event.stopPropagation();
@@ -962,16 +976,14 @@
                         {cancellingJobIds.has(job.id) ? 'Cancelling...' : 'Cancel'}
                       </Button>
                     {/if}
-                    {#if canDelete(job)}
-                      <Button
-                        variant="icon"
-                        title={deletingJobIds.has(job.id) ? 'Deleting...' : 'Delete'}
-                        disabled={deletingJobIds.has(job.id)}
-                        onclick={(event) => handleRowDelete(event, job)}
-                      >
-                        <TrashIcon size={16} alt="Delete" />
-                      </Button>
-                    {/if}
+                    <Button
+                      variant="icon"
+                      title={canDelete(job) ? (deletingJobIds.has(job.id) ? 'Deleting...' : 'Delete') : 'Delete unavailable'}
+                      disabled={!canDelete(job) || deletingJobIds.has(job.id)}
+                      onclick={(event) => handleRowDelete(event, job)}
+                    >
+                      <TrashIcon size={16} alt="Delete" />
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -993,7 +1005,14 @@
             <div class="details-grid">
               <p><strong>Status:</strong> {statusLabel(selectedJob)}{#if statusDetail(selectedJob)} ({statusDetail(selectedJob)}){/if}</p>
               <p><strong>Name:</strong> {selectedJob.identifier}</p>
-              <p><strong>URL:</strong> {selectedJob.url}</p>
+              <p>
+                <strong>URL:</strong>
+                {#if selectedJobUrl}
+                  <a href={selectedJobUrl} target="_blank" rel="noopener noreferrer" title={selectedJob.url}>{selectedJob.url}</a>
+                {:else}
+                  {selectedJob.url}
+                {/if}
+              </p>
               <p><strong>Output:</strong> {selectedJob.output_subdir}</p>
               <p><strong>Progress:</strong> {describeProgress(selectedJob)}</p>
               <p><strong>Files:</strong> {selectedJob.completed_files}/{selectedJob.total_files}</p>

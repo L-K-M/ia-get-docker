@@ -6,6 +6,9 @@ Containerized wrapper around [`L-K-M/ia-get`](https://github.com/L-K-M/ia-get) (
 
 **Do not expose this to the Internet.**
 
+> [!IMPORTANT]
+> LLM Disclosure: Much of this code base was written with the help of large language models — AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 ## Quick start
 
 1. Copy environment defaults and adjust paths/UID/GID:
