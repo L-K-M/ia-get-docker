@@ -30,7 +30,8 @@ docker compose up -d
 ```
 
 Or run `./update.sh`, which pulls the latest code and performs the
-no-cache rebuild and restart for you.
+no-cache rebuild and restart for you. It also works under `sudo`: the
+git steps run as the invoking user so the checkout stays user-owned.
 
 3. Open the web UI:
 

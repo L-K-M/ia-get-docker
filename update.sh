@@ -10,13 +10,23 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# When started via sudo, run git as the invoking user so the working tree
+# keeps its ownership and git's dubious-ownership checks stay satisfied.
+run_git() {
+  if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    sudo -u "$SUDO_USER" -H git "$@"
+    return
+  fi
+  git "$@"
+}
+
 if [ ! -f .env ]; then
   echo "error: .env not found — run 'cp .env.example .env' and adjust it first" >&2
   exit 1
 fi
 
-git fetch origin main
-git pull --ff-only origin main
+run_git fetch origin main
+run_git pull --ff-only origin main
 
 docker compose down
 docker compose build --no-cache
