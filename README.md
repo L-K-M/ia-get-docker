@@ -29,6 +29,9 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
+Or run `./update.sh`, which pulls the latest code and performs the
+no-cache rebuild and restart for you.
+
 3. Open the web UI:
 
 ```text
