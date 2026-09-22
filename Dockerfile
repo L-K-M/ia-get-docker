@@ -15,7 +15,7 @@ RUN git clone --depth 1 --branch "${IA_GET_REF}" "${IA_GET_REPO}" .
 RUN cargo build --release && strip target/release/ia-get
 
 
-FROM node:22-bookworm-slim AS web-builder
+FROM node:26-bookworm-slim AS web-builder
 
 WORKDIR /src/ui
 
