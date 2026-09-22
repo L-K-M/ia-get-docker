@@ -1,5 +1,8 @@
 # ia-get Docker Wrapper
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 ![Screenshot](screenshot.png)
 
 Containerized wrapper around [`L-K-M/ia-get`](https://github.com/L-K-M/ia-get) (a fork of `wimpysworld/ia-get` with authentication support), built for localhost or NAS-style deployments (including TrueNAS), with an optional web UI.
