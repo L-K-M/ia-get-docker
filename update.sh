@@ -30,8 +30,10 @@ fi
 run_git fetch origin main
 run_git pull --ff-only origin main
 
-docker compose down
+# Build before stopping the old stack: on build failure the running service
+# stays up, and downtime is limited to the container recreation.
 docker compose build --no-cache --pull
+docker compose down
 docker compose up -d
 
 echo "Updated and restarted. UI: http://<your-host-ip>:${WEB_PORT:-14637}"
