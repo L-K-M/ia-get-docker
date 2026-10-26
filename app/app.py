@@ -76,7 +76,13 @@ class Job:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BODY_BYTES
 
-AUTH_EXEMPT_EXACT = ("/", "/index.html", "/healthz", "/api/auth-status")
+AUTH_EXEMPT_EXACT = (
+    "/",
+    "/index.html",
+    "/healthz",
+    "/api/auth-status",
+    "/Third-Party-Notices.txt",
+)
 AUTH_EXEMPT_PREFIXES = ("/assets/",)
 
 

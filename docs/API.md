@@ -36,6 +36,7 @@ The following routes never require an API key:
 - `GET /` , `GET /index.html` , `GET /assets/*` (static UI)
 - `GET /healthz` (health check)
 - `GET /api/auth-status` (tells clients whether auth is enabled)
+- `GET /Third-Party-Notices.txt` (license notices of the web UI's bundled code)
 
 ### Auth status
 
