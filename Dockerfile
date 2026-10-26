@@ -19,9 +19,10 @@ RUN cargo build --release --locked && strip target/release/ia-get
 
 # Notices for the Rust crates linked into ia-get and for the Rust standard
 # library (Rust-Licenses.html), from the tree just built. Fails when a
-# crate publishes no license text.
+# crate publishes no license text. The header names the commit built.
 RUN --mount=type=bind,source=scripts/licenses/rust-notices.py,target=/tmp/rust-notices.py \
-    python3 /tmp/rust-notices.py --target host --title ia-get \
+    python3 /tmp/rust-notices.py --target host \
+      --title "ia-get (commit $(git rev-parse --short=12 HEAD))" \
       --out /notices/Rust-Notices.txt --rust-std /notices/Rust-Licenses.html
 
 
