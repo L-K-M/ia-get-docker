@@ -28,6 +28,14 @@ npm run dev
 
 Vite runs on `http://localhost:4173` and proxies `/api` requests to the Flask backend at `http://localhost:8080`.
 
+## Licensing
+
+- ia-get-docker's own code is MIT (`LICENSE`). Keep the README License section and the image's `org.opencontainers.image.licenses` label (Dockerfile `LABEL`, passed through in `release.yml`) consistent with it and with the image contents.
+- Before adding a dependency, vendored file or bundled asset (fonts, images, icons, data), confirm its license allows redistribution in the image. Never vendor third-party code without its license file.
+- The image build writes its notices to `/usr/share/doc/ia-get-docker/` from what it actually bundles, and each generator fails on a component without license text: `scripts/licenses/rust-notices.py` (ia-get's crates and `Rust-Licenses.html`), `scripts/licenses/python-notices.py` with `licenses/python-notices.toml` (Python packages and CPython), `ui/scripts/third-party-notices.mjs` with `ui/third-party-notices.jsonc` (web UI, also served at `/Third-Party-Notices.txt`) and `scripts/licenses/os-packages.sh` (Debian packages). Record gaps as explicit, commented overrides. `THIRD_PARTY_NOTICES.md` is hand-written.
+- `licenses/python-notices.toml` pins the versions it was checked for. When a bump of `requirements.txt` or the base image changes one, re-check that package and update the pin; for a new CPython minor, regenerate the Incorporated Software text with `scripts/licenses/fetch-cpython-notices.py`.
+- CI and `release.yml` run `scripts/verify-image-notices.sh` on the built image. When it reports a label mismatch, check the new terms and copy the expression it prints into the Dockerfile `LABEL`.
+
 ## Troubleshooting
 
 - `PermissionError: /app/app/__init__.py` at startup:

@@ -76,7 +76,13 @@ class Job:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BODY_BYTES
 
-AUTH_EXEMPT_EXACT = ("/", "/index.html", "/healthz", "/api/auth-status")
+AUTH_EXEMPT_EXACT = (
+    "/",
+    "/index.html",
+    "/healthz",
+    "/api/auth-status",
+    "/Third-Party-Notices.txt",
+)
 AUTH_EXEMPT_PREFIXES = ("/assets/",)
 
 
@@ -1038,6 +1044,13 @@ def ui_assets(asset_path: str) -> object:
 def ui_images(asset_path: str) -> object:
     images_dir = WEB_ROOT / "img"
     return send_from_directory(str(images_dir), asset_path)
+
+
+# License notices of the third-party code in the UI bundle, which the
+# bundle's banner comment points to; the UI build writes the file.
+@app.get("/Third-Party-Notices.txt")
+def ui_notices() -> object:
+    return send_from_directory(str(WEB_ROOT), "Third-Party-Notices.txt")
 
 
 @app.get("/index.html")

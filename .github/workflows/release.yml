@@ -26,6 +26,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read the image license label
+        id: oci
+        run: |
+          licenses="$(python3 scripts/licenses/oci-licenses.py dockerfile Dockerfile)"
+          echo "licenses=$licenses" >> "$GITHUB_OUTPUT"
+
       - name: Derive image metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -35,6 +41,26 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+          # Without this the label would claim only the repository's MIT
+          # license; the Dockerfile's label covers the bundled code too.
+          labels: |
+            org.opencontainers.image.licenses=${{ steps.oci.outputs.licenses }}
+
+      # Check the image before anything is pushed; the push below reuses
+      # this build's cache.
+      - name: Build image for checks
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ia-get-docker:check
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify notices in the image
+        run: sh scripts/verify-image-notices.sh ia-get-docker:check
 
       - name: Build and push
         uses: docker/build-push-action@v7

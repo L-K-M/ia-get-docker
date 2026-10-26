@@ -1,1 +1,9 @@
 Flask==3.1.3
+# Flask's dependencies, pinned so the image's Python notices only change
+# with deliberate bumps (licenses/python-notices.toml pins some of them).
+blinker==1.9.0
+click==8.5.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+Werkzeug==3.1.9

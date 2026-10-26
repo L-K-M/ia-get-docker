@@ -96,6 +96,15 @@ The compose volume still controls where files are written.
 
 ## License
 
-This wrapper project is licensed under the MIT License. See `LICENSE`.
-
-`ia-get` is also MIT licensed. Attribution is included in `THIRD_PARTY_NOTICES.md`.
+ia-get-docker's own code is released under the [MIT License](LICENSE). The
+Docker image bundles third-party code that keeps its own licenses: `ia-get`
+(MIT) with its Rust crates and the Rust standard library, the web UI's npm
+packages (Svelte, and `@lkmc/system7-ui` with the OFL-1.1 fonts Geneva 9.1
+and Sysfont), Flask and its Python dependencies, CPython, and Debian
+packages. MPL-2.0 crates such as `colored` are used unmodified; the notices
+give the location of their source. The notices ship in the image in
+`/usr/share/doc/ia-get-docker/`: `THIRD_PARTY_NOTICES.md`,
+`Third-Party-Notices.txt`, `Rust-Licenses.html`, and `OS-Packages.txt` for
+the Debian packages with their exact source versions. System packages from
+the base image also keep their notices in `/usr/share/doc/*/copyright`. The
+web UI serves its notices at `/Third-Party-Notices.txt`.

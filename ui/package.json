@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/third-party-notices.mjs --modules node_modules/.cache/bundled-modules --config third-party-notices.jsonc --title \"ia-get-docker web UI\" --check-assets dist --out dist/Third-Party-Notices.txt",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -26,6 +26,26 @@ jobs:
       - name: Compile sources (syntax check)
         run: python -m compileall app
 
+      # The image label must name the licenses of the bundled code, not only
+      # this repository's MIT license, and the README must say where the
+      # image's notices ship.
+      - name: Check license statements
+        run: |
+          grep -q '^LABEL org.opencontainers.image.licenses="MIT AND ' Dockerfile
+          grep -q 'Third-Party-Notices.txt' README.md
+          grep -q 'Rust-Licenses.html' README.md
+
+      # Browsers send no X-API-Key header, so the UI's license notices must
+      # stay reachable when API_KEY is set.
+      - name: Check the notices route skips the API key
+        env:
+          API_KEY: ci
+          WEB_ROOT: ${{ runner.temp }}/web
+        run: |
+          mkdir -p "$WEB_ROOT"
+          echo notices > "$WEB_ROOT/Third-Party-Notices.txt"
+          python -c 'import sys; from app.app import app; status = app.test_client().get("/Third-Party-Notices.txt").status_code; sys.exit(f"/Third-Party-Notices.txt returned {status}" if status != 200 else 0)'
+
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
@@ -41,6 +61,12 @@ jobs:
           context: .
           file: Dockerfile
           push: false
-          load: false
+          # Loaded so the next step can look inside it.
+          load: true
+          tags: ia-get-docker:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # License notices and the licenses label inside the built image.
+      - name: Verify notices in the image
+        run: sh scripts/verify-image-notices.sh ia-get-docker:ci
