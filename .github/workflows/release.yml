@@ -28,7 +28,9 @@ jobs:
 
       - name: Read the image license label
         id: oci
-        run: echo "licenses=$(python3 scripts/licenses/oci-licenses.py dockerfile Dockerfile)" >> "$GITHUB_OUTPUT"
+        run: |
+          licenses="$(python3 scripts/licenses/oci-licenses.py dockerfile Dockerfile)"
+          echo "licenses=$licenses" >> "$GITHUB_OUTPUT"
 
       - name: Derive image metadata
         id: meta

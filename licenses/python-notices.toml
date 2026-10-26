@@ -36,7 +36,7 @@ covers = ["native:pip/_vendor/distlib/*.exe"]
 # the base image's Debian libreadline8 and libgdbm6 (GPL-3.0-or-later)
 # dynamically; their copyright files and the GPL text ship with those
 # packages, and OS-Packages.txt names their exact source versions.
-versions = ["3.14.*"]
+versions = ["3.14.9"]
 files = ["cpython-3.14-incorporated.txt"]
 source = "GNU readline and GNU gdbm: the Debian bookworm packages libreadline8 (source package readline) and libgdbm6 (source package gdbm) from the base image; OS-Packages.txt next to this file lists their exact source versions with snapshot.debian.org links"
 covers = ["expat", "mpdecimal", "gnu-readline", "gnu-gdbm"]

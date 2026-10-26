@@ -44,7 +44,7 @@ jobs:
         run: |
           mkdir -p "$WEB_ROOT"
           echo notices > "$WEB_ROOT/Third-Party-Notices.txt"
-          python -c 'import sys; sys.path.insert(0, "app"); from app import app; status = app.test_client().get("/Third-Party-Notices.txt").status_code; sys.exit(f"/Third-Party-Notices.txt returned {status}" if status != 200 else 0)'
+          python -c 'import sys; from app.app import app; status = app.test_client().get("/Third-Party-Notices.txt").status_code; sys.exit(f"/Third-Party-Notices.txt returned {status}" if status != 200 else 0)'
 
   docker:
     name: Build Docker image
