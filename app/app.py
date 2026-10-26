@@ -1040,6 +1040,13 @@ def ui_images(asset_path: str) -> object:
     return send_from_directory(str(images_dir), asset_path)
 
 
+# License notices of the third-party code in the UI bundle, which the
+# bundle's banner comment points to; the UI build writes the file.
+@app.get("/Third-Party-Notices.txt")
+def ui_notices() -> object:
+    return send_from_directory(str(WEB_ROOT), "Third-Party-Notices.txt")
+
+
 @app.get("/index.html")
 def index_alias() -> tuple[dict[str, str], int] | object:
     return index()
