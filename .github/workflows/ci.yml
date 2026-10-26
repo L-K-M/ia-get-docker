@@ -35,6 +35,17 @@ jobs:
           grep -q 'Third-Party-Notices.txt' README.md
           grep -q 'Rust-Licenses.html' README.md
 
+      # Browsers send no X-API-Key header, so the UI's license notices must
+      # stay reachable when API_KEY is set.
+      - name: Check the notices route skips the API key
+        env:
+          API_KEY: ci
+          WEB_ROOT: ${{ runner.temp }}/web
+        run: |
+          mkdir -p "$WEB_ROOT"
+          echo notices > "$WEB_ROOT/Third-Party-Notices.txt"
+          python -c 'import sys; sys.path.insert(0, "app"); from app import app; status = app.test_client().get("/Third-Party-Notices.txt").status_code; sys.exit(f"/Third-Party-Notices.txt returned {status}" if status != 200 else 0)'
+
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
