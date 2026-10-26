@@ -10,8 +10,8 @@ the code, verify the image builds, and publish it.
 ## Workflows
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| `.github/workflows/ci.yml` | PRs + pushes to `main` | Python checks + verify the Docker image builds |
-| `.github/workflows/release.yml` | Pushing a `v*` tag | Build & push the image to GHCR |
+| `.github/workflows/ci.yml` | PRs + pushes to `main` | Python checks + verify the Docker image builds and carries its license notices |
+| `.github/workflows/release.yml` | Pushing a `v*` tag | Build, check the license notices, and push the image to GHCR |
 
 ## Continuous integration (`ci.yml`)
 
@@ -20,10 +20,15 @@ Runs on every pull request and on every push to `main`. It has two jobs:
 - **Python checks** — sets up Python 3.12, installs `requirements.txt`
   (Flask), then runs `python -m compileall app` as a fast syntax check of the
   Python sources. There is no test suite or linter config in the repo, so this
-  is the lightweight gate that the code at least parses.
+  is the lightweight gate that the code at least parses. It also checks the
+  license statements (the Dockerfile's `org.opencontainers.image.licenses`
+  label and the README's notice paths) and that `/Third-Party-Notices.txt`
+  stays reachable without the API key.
 - **Build Docker image** — builds the image with
-  `docker/build-push-action@v6` using `push: false` / `load: false`, so every
-  PR proves the multi-stage image still builds without publishing anything. The
+  `docker/build-push-action@v7` using `push: false` / `load: true`, so every
+  PR proves the multi-stage image still builds without publishing anything.
+  `scripts/verify-image-notices.sh` then checks the license notices in
+  `/usr/share/doc/ia-get-docker/` and that the licenses label matches them. The
   build context is the **repository root** (`.`) and the file is the root
   `Dockerfile`, which copies `requirements.txt`, `app/`, and `ui/`. The image
   exposes port `8080`. GitHub Actions layer caching (`type=gha`) keeps rebuilds
@@ -38,7 +43,9 @@ pip install -r requirements.txt
 python -m compileall app
 
 # Verify the Docker image builds (context = repo root, file = Dockerfile)
-docker build -f Dockerfile .
+# and carries its license notices
+docker build -f Dockerfile -t ia-get-docker:local .
+sh scripts/verify-image-notices.sh ia-get-docker:local
 ```
 
 ## Releases (`release.yml`)
@@ -50,7 +57,9 @@ git push origin v1.2.3
 
 The image is published to `ghcr.io/l-k-m/ia-get-docker` with tags `1.2.3`,
 `1.2`, and `latest` (the `latest` tag is skipped for pre-release tags such as
-`v1.2.3-rc.1`). GHCR lowercases the namespace, so even though the owner is
+`v1.2.3-rc.1`). Before pushing, the workflow loads the image on the runner and runs
+`scripts/verify-image-notices.sh` on it; the push reuses that build's cache.
+GHCR lowercases the namespace, so even though the owner is
 `L-K-M` the image path is `ghcr.io/l-k-m/ia-get-docker`. Pull with:
 
 ```
