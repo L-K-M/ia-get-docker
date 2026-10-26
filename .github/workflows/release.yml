@@ -26,6 +26,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read the image license label
+        id: oci
+        run: echo "licenses=$(python3 scripts/licenses/oci-licenses.py dockerfile Dockerfile)" >> "$GITHUB_OUTPUT"
+
       - name: Derive image metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -35,6 +39,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+          # Without this the label would claim only the repository's MIT
+          # license; the Dockerfile's label covers the bundled code too.
+          labels: |
+            org.opencontainers.image.licenses=${{ steps.oci.outputs.licenses }}
 
       - name: Build and push
         uses: docker/build-push-action@v7

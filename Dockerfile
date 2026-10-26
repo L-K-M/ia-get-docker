@@ -98,6 +98,12 @@ RUN chmod -R a+rX /app \
     && mkdir -p /downloads \
     && chmod 775 /downloads
 
+# Licenses of the image contents: this project's MIT plus every term in
+# Third-Party-Notices.txt, Rust-Licenses.html (the Rust standard library)
+# and the Debian packages installed above (tini). Base image packages are
+# listed in OS-Packages.txt instead. CI checks this against the notices.
+LABEL org.opencontainers.image.licenses="MIT AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSD-2-Clause OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR LGPL-2.1-or-later OR MIT) AND (Apache-2.0 OR MIT) AND (CC-BY-2.5 OR CC-BY-3.0) AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND CDLA-Permissive-2.0 AND ISC AND MPL-2.0 AND OFL-1.1 AND PSF-2.0 AND Unicode-3.0 AND Unlicense AND Zlib"
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
