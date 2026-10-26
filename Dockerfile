@@ -38,7 +38,7 @@ COPY ui /src/ui
 RUN npm run build
 
 
-FROM python:3.14-slim-bookworm AS base
+FROM python:3.15-slim-bookworm AS base
 
 FROM base AS runtime
 
