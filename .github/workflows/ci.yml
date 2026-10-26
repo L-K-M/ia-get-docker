@@ -26,6 +26,15 @@ jobs:
       - name: Compile sources (syntax check)
         run: python -m compileall app
 
+      # The image label must name the licenses of the bundled code, not only
+      # this repository's MIT license, and the README must say where the
+      # image's notices ship.
+      - name: Check license statements
+        run: |
+          grep -q '^LABEL org.opencontainers.image.licenses="MIT AND ' Dockerfile
+          grep -q 'Third-Party-Notices.txt' README.md
+          grep -q 'Rust-Licenses.html' README.md
+
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
