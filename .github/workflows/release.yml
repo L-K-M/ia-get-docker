@@ -44,6 +44,22 @@ jobs:
           labels: |
             org.opencontainers.image.licenses=${{ steps.oci.outputs.licenses }}
 
+      # Check the image before anything is pushed; the push below reuses
+      # this build's cache.
+      - name: Build image for checks
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ia-get-docker:check
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify notices in the image
+        run: sh scripts/verify-image-notices.sh ia-get-docker:check
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:

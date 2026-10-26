@@ -50,6 +50,12 @@ jobs:
           context: .
           file: Dockerfile
           push: false
-          load: false
+          # Loaded so the next step can look inside it.
+          load: true
+          tags: ia-get-docker:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # License notices and the licenses label inside the built image.
+      - name: Verify notices in the image
+        run: sh scripts/verify-image-notices.sh ia-get-docker:ci
