@@ -1,0 +1,42 @@
+# Overrides for scripts/licenses/python-notices.py, which writes the notices
+# for the Python packages and the CPython interpreter in the image. Paths in
+# `files` are relative to this file. `versions` lists the versions each entry
+# was checked for: another installed version fails the image build until
+# someone re-checks it and updates the pin (requirements.txt pins them all).
+
+[distribution.itsdangerous]
+# Metadata says "BSD"; its LICENSE.txt is the BSD 3-clause text.
+versions = ["2.2.0"]
+license = "BSD-3-Clause"
+
+[distribution.jinja2]
+# Metadata says "BSD"; its LICENSE.txt is the BSD 3-clause text.
+versions = ["3.1.6"]
+license = "BSD-3-Clause"
+
+[distribution.werkzeug]
+# Its debugger ships the Silk icon set (werkzeug/debug/shared/*.png) under
+# CC-BY-2.5 or CC-BY-3.0; ICON_LICENSE.md (creator, link, licenses) ships
+# with it. The expression names the icons so the image label covers them.
+versions = ["3.1.9"]
+license = "BSD-3-Clause AND (CC-BY-2.5 OR CC-BY-3.0)"
+
+[distribution.pip]
+# Shipped by the python base image. Its dist-info carries the vendored
+# packages' licenses; the .exe files are distlib's Windows launchers,
+# covered by distlib's license among them.
+versions = ["26.*"]
+covers = ["native:pip/_vendor/distlib/*.exe"]
+
+[cpython]
+# The base image's interpreter. Its LICENSE.txt (PSF) is added
+# automatically; this adds "Licenses and Acknowledgements for Incorporated
+# Software" from Doc/license.rst at v3.14.9 (fetch-cpython-notices.py), which
+# has the expat and libmpdec sections. The readline and _gdbm modules link
+# the base image's Debian libreadline8 and libgdbm6 (GPL-3.0-or-later)
+# dynamically; their copyright files and the GPL text ship with those
+# packages, and OS-Packages.txt names their exact source versions.
+versions = ["3.14.*"]
+files = ["cpython-3.14-incorporated.txt"]
+source = "GNU readline and GNU gdbm: the Debian bookworm packages libreadline8 (source package readline) and libgdbm6 (source package gdbm) from the base image; OS-Packages.txt next to this file lists their exact source versions with snapshot.debian.org links"
+covers = ["expat", "mpdecimal", "gnu-readline", "gnu-gdbm"]
